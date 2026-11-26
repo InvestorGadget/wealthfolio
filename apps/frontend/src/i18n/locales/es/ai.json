@@ -336,7 +336,10 @@
     "retryCreate": "Reintentar creación",
     "createRule": "Crear regla",
     "notCreated": "La regla no se creó. El reintento usará un nuevo id de borrador.",
-    "chatNotUpdated": "Regla creada, pero no se pudo actualizar este chat. Actualiza las reglas antes de reintentar desde este borrador."
+    "chatNotUpdated": "Regla creada, pero no se pudo actualizar este chat. Actualiza las reglas antes de reintentar desde este borrador.",
+    "payeeCondition": "El beneficiario es",
+    "setPayee": "También asigna el beneficiario",
+    "selectedPayee": "Beneficiario seleccionado"
   },
   "goals": {
     "fetched_one": "Se obtuvo {{count}} objetivo",

@@ -317,7 +317,10 @@
     "retryCreate": "Retry create",
     "createRule": "Create rule",
     "notCreated": "Rule was not created. Retry will use a fresh draft id.",
-    "chatNotUpdated": "Rule created, but this chat could not be updated. Refresh rules before retrying from this draft."
+    "chatNotUpdated": "Rule created, but this chat could not be updated. Refresh rules before retrying from this draft.",
+    "payeeCondition": "Payee is",
+    "setPayee": "Also sets payee",
+    "selectedPayee": "Selected payee"
   },
   "goals": {
     "fetched_one": "Fetched {{count}} goal",

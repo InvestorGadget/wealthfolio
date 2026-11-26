@@ -894,6 +894,8 @@ export interface CreateCategorizationRuleArgs {
   categoryKey: string;
   activityType?: string;
   accountId?: string;
+  payeeConditionId?: string;
+  setPayeeId?: string;
 }
 
 export interface CreateCategorizationRuleOutput {
@@ -902,6 +904,9 @@ export interface CreateCategorizationRuleOutput {
   rule?: NewCategorizationRule;
   categoryPath?: string;
   accountName?: string | null;
+  /** Names of the payees the drafted rule matches on or also sets. */
+  payeeConditionName?: string | null;
+  setPayeeName?: string | null;
   message?: string;
   submitted?: boolean;
   submittedAt?: string;

@@ -308,7 +308,10 @@
     "retryCreate": "다시 생성",
     "createRule": "규칙 생성",
     "notCreated": "규칙이 생성되지 않았습니다. 다시 시도하면 새 초안 ID를 사용합니다.",
-    "chatNotUpdated": "규칙이 생성되었지만 이 채팅은 업데이트되지 못했습니다. 이 초안에서 다시 시도하기 전에 규칙을 새로고침하세요."
+    "chatNotUpdated": "규칙이 생성되었지만 이 채팅은 업데이트되지 못했습니다. 이 초안에서 다시 시도하기 전에 규칙을 새로고침하세요.",
+    "payeeCondition": "거래처 조건",
+    "setPayee": "거래처도 설정",
+    "selectedPayee": "선택한 거래처"
   },
   "goals": {
     "fetched_one": "목표 {{count}}개를 가져왔습니다",

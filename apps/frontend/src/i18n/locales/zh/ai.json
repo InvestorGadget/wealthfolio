@@ -308,7 +308,10 @@
     "retryCreate": "重试创建",
     "createRule": "创建规则",
     "notCreated": "规则未创建。重试将使用新的草稿 ID。",
-    "chatNotUpdated": "规则已创建，但此对话无法更新。请刷新规则后再从此草稿重试。"
+    "chatNotUpdated": "规则已创建，但此对话无法更新。请刷新规则后再从此草稿重试。",
+    "payeeCondition": "收款方为",
+    "setPayee": "同时设置收款方",
+    "selectedPayee": "所选收款方"
   },
   "goals": {
     "fetched_one": "已获取 {{count}} 个目标",

@@ -179,18 +179,41 @@ export function CreateCategorizationRuleToolUIContentImpl({
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-2 text-sm sm:grid-cols-2">
-          <div>
-            <div className="text-muted-foreground text-xs">{t("ai:createRule.pattern")}</div>
-            <div className="truncate font-medium">{rule.pattern}</div>
-          </div>
-          <div>
-            <div className="text-muted-foreground text-xs">{t("ai:createRule.match")}</div>
-            <div className="truncate font-medium">{formatMatchType(rule.matchType)}</div>
-          </div>
+          {/* A rule that matches on a payee alone has no text to show. */}
+          {rule.pattern ? (
+            <>
+              <div>
+                <div className="text-muted-foreground text-xs">{t("ai:createRule.pattern")}</div>
+                <div className="truncate font-medium">{rule.pattern}</div>
+              </div>
+              <div>
+                <div className="text-muted-foreground text-xs">{t("ai:createRule.match")}</div>
+                <div className="truncate font-medium">{formatMatchType(rule.matchType)}</div>
+              </div>
+            </>
+          ) : null}
+          {rule.payeeConditionId ? (
+            <div>
+              <div className="text-muted-foreground text-xs">
+                {t("ai:createRule.payeeCondition")}
+              </div>
+              <div className="truncate font-medium">
+                {result.payeeConditionName ?? t("ai:createRule.selectedPayee")}
+              </div>
+            </div>
+          ) : null}
           <div>
             <div className="text-muted-foreground text-xs">{t("ai:createRule.category")}</div>
             <div className="truncate font-medium">{categoryPath}</div>
           </div>
+          {rule.setPayeeId ? (
+            <div>
+              <div className="text-muted-foreground text-xs">{t("ai:createRule.setPayee")}</div>
+              <div className="truncate font-medium">
+                {result.setPayeeName ?? t("ai:createRule.selectedPayee")}
+              </div>
+            </div>
+          ) : null}
           <div>
             <div className="text-muted-foreground text-xs">{t("ai:createRule.scope")}</div>
             <div className="truncate font-medium">{accountLabel}</div>

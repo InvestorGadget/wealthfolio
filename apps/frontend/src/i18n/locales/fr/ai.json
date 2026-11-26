@@ -336,7 +336,10 @@
     "retryCreate": "Réessayer la création",
     "createRule": "Créer la règle",
     "notCreated": "La règle n'a pas été créée. Une nouvelle tentative utilisera un nouvel identifiant de brouillon.",
-    "chatNotUpdated": "Règle créée, mais ce chat n'a pas pu être mis à jour. Actualisez les règles avant de réessayer à partir de ce brouillon."
+    "chatNotUpdated": "Règle créée, mais ce chat n'a pas pu être mis à jour. Actualisez les règles avant de réessayer à partir de ce brouillon.",
+    "payeeCondition": "Le bénéficiaire est",
+    "setPayee": "Définit aussi le bénéficiaire",
+    "selectedPayee": "Bénéficiaire sélectionné"
   },
   "goals": {
     "fetched_one": "{{count}} objectif récupéré",

@@ -336,7 +336,10 @@
     "retryCreate": "Riprova la creazione",
     "createRule": "Crea regola",
     "notCreated": "La regola non è stata creata. Il nuovo tentativo userà un nuovo id di bozza.",
-    "chatNotUpdated": "Regola creata, ma non è stato possibile aggiornare questa chat. Aggiorna le regole prima di riprovare da questa bozza."
+    "chatNotUpdated": "Regola creata, ma non è stato possibile aggiornare questa chat. Aggiorna le regole prima di riprovare da questa bozza.",
+    "payeeCondition": "Il beneficiario è",
+    "setPayee": "Imposta anche il beneficiario",
+    "selectedPayee": "Beneficiario selezionato"
   },
   "goals": {
     "fetched_one": "Recuperato {{count}} obiettivo",

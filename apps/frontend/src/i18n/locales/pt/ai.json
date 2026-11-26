@@ -336,7 +336,10 @@
     "retryCreate": "Tentar criar novamente",
     "createRule": "Criar regra",
     "notCreated": "A regra não foi criada. A nova tentativa usará um novo ID de rascunho.",
-    "chatNotUpdated": "Regra criada, mas não foi possível atualizar este chat. Atualize as regras antes de tentar novamente a partir deste rascunho."
+    "chatNotUpdated": "Regra criada, mas não foi possível atualizar este chat. Atualize as regras antes de tentar novamente a partir deste rascunho.",
+    "payeeCondition": "O beneficiário é",
+    "setPayee": "Também define o beneficiário",
+    "selectedPayee": "Beneficiário selecionado"
   },
   "goals": {
     "fetched_one": "{{count}} meta obtida",

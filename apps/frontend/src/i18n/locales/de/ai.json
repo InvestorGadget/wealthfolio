@@ -317,7 +317,10 @@
     "retryCreate": "Erstellung wiederholen",
     "createRule": "Regel erstellen",
     "notCreated": "Die Regel wurde nicht erstellt. Ein erneuter Versuch verwendet eine neue Entwurfs-ID.",
-    "chatNotUpdated": "Regel erstellt, dieser Chat konnte jedoch nicht aktualisiert werden. Aktualisieren Sie die Regeln, bevor Sie es aus diesem Entwurf erneut versuchen."
+    "chatNotUpdated": "Regel erstellt, dieser Chat konnte jedoch nicht aktualisiert werden. Aktualisieren Sie die Regeln, bevor Sie es aus diesem Entwurf erneut versuchen.",
+    "payeeCondition": "Zahlungsempfänger ist",
+    "setPayee": "Legt auch den Zahlungsempfänger fest",
+    "selectedPayee": "Ausgewählter Zahlungsempfänger"
   },
   "goals": {
     "fetched_one": "{{count}} Ziel abgerufen",

@@ -270,7 +270,10 @@
     "ruleCreatedButton": "تم إنشاء القاعدة",
     "scope": "النطاق",
     "scopedAccount": "الحساب المحدد",
-    "selectedCategory": "الفئة المحددة"
+    "selectedCategory": "الفئة المحددة",
+    "payeeCondition": "المستفيد هو",
+    "setPayee": "تعيّن المستفيد أيضًا",
+    "selectedPayee": "المستفيد المحدد"
   },
   "empty": {
     "configureProviders": "إعداد مزوّدي الذكاء الاصطناعي",
