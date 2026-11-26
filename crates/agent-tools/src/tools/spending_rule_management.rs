@@ -59,6 +59,29 @@ async fn validate(env: &dyn AgentEnvironment, change: &Change) -> Result<(), Age
     Ok(())
 }
 
+/// A proposal that leaves a payee field out keeps the reviewed rule's value.
+///
+/// `proposed` replaces the whole rule, and a missing optional field reads as
+/// null. For the payee condition that would silently turn "only this payee"
+/// into "every activity", so only an explicit null clears it. A caller that
+/// copies the proposal from `prepare` unchanged, as asked, is unaffected.
+fn keep_unmentioned_payee_fields(mut args: Value) -> Value {
+    let expected = args.get("expected").cloned();
+    if let (Some(expected), Some(proposed)) = (
+        expected,
+        args.get_mut("proposed").and_then(Value::as_object_mut),
+    ) {
+        for key in ["payeeConditionId", "setPayeeId"] {
+            if !proposed.contains_key(key) {
+                if let Some(value) = expected.get(key) {
+                    proposed.insert(key.to_string(), value.clone());
+                }
+            }
+        }
+    }
+    args
+}
+
 pub struct PrepareCategorizationRuleChange;
 #[async_trait::async_trait]
 impl AgentTool for PrepareCategorizationRuleChange {
@@ -150,7 +173,8 @@ impl AgentTool for CommitCategorizationRuleChange {
         env: Arc<dyn AgentEnvironment>,
         args: Value,
     ) -> Result<AgentToolResult, AgentToolError> {
-        let change: Change = serde_json::from_value(args).map_err(|_| invalid())?;
+        let change: Change =
+            serde_json::from_value(keep_unmentioned_payee_fields(args)).map_err(|_| invalid())?;
         validate(env.as_ref(), &change).await?;
         let service = env.categorization_rules_service();
         let result = if let Some(proposed) = change.proposed {

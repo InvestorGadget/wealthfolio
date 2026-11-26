@@ -5847,6 +5847,158 @@ async fn reviewed_spending_splits_rules_events_and_tags_roundtrip_without_activi
     )
     .await
     .is_empty());
+    // A payee condition: set through a reviewed edit, listed, and kept by a
+    // later edit whose proposal does not mention it.
+    let payee = api_post(
+        &server,
+        &cookie,
+        "taxonomies/categories",
+        serde_json::json!({"taxonomyId":"payees","name":"Synthetic payee","key":"synthetic_payee","color":"#123456","sortOrder":0}),
+    )
+    .await["id"]
+        .clone();
+    let condition = mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "prepare_categorization_rule_change",
+        serde_json::json!({"ruleId":saved["id"],"changes":{"payeeConditionId":payee}}),
+    )
+    .await;
+    let conditioned = mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "commit_categorization_rule_change",
+        condition["change"].clone(),
+    )
+    .await;
+    assert_eq!(conditioned["updated"]["payeeConditionId"], payee);
+    let listed = mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "list_categorization_rules",
+        serde_json::json!({}),
+    )
+    .await;
+    let listed_rule = listed["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|rule| rule["id"] == saved["id"])
+        .unwrap();
+    assert_eq!(listed_rule["payeeConditionId"], payee);
+    assert_eq!(listed_rule["payeeConditionName"], "Synthetic payee");
+    let mut rename = mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "prepare_categorization_rule_change",
+        serde_json::json!({"ruleId":saved["id"],"changes":{"name":"Renamed rule"}}),
+    )
+    .await["change"]
+        .clone();
+    assert_eq!(rename["proposed"]["payeeConditionId"], payee);
+    // A caller that drops the optional payee fields from the proposal must
+    // not widen the rule to every payee.
+    let proposed = rename["proposed"].as_object_mut().unwrap();
+    proposed.remove("payeeConditionId");
+    proposed.remove("setPayeeId");
+    let renamed = mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "commit_categorization_rule_change",
+        rename,
+    )
+    .await;
+    assert_eq!(renamed["updated"]["name"], "Renamed rule");
+    assert_eq!(renamed["updated"]["payeeConditionId"], payee);
+    // Without a text condition the rule matches on the payee alone, and is
+    // stored with the placeholder pattern older versions never match.
+    let payee_only = mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "prepare_categorization_rule_change",
+        serde_json::json!({"ruleId":saved["id"],"changes":{"pattern":""}}),
+    )
+    .await;
+    let payee_only = mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "commit_categorization_rule_change",
+        payee_only["change"].clone(),
+    )
+    .await;
+    assert_eq!(payee_only["updated"]["pattern"], "(?!)");
+    assert_eq!(payee_only["updated"]["matchType"], "regex");
+    assert_eq!(payee_only["updated"]["payeeConditionId"], payee);
+    // Nothing would be left of it without the payee condition.
+    assert!(!mcp_call_tool_error(
+        &server,
+        &pat,
+        &session,
+        "prepare_categorization_rule_change",
+        serde_json::json!({"ruleId":saved["id"],"changes":{"payeeConditionId":null}}),
+    )
+    .await
+    .is_empty());
+    // Nor can it match on a payee that does not exist, or also set one.
+    for changes in [
+        serde_json::json!({"payeeConditionId":"no-such-payee"}),
+        serde_json::json!({"setPayeeId":payee}),
+    ] {
+        assert!(!mcp_call_tool_error(
+            &server,
+            &pat,
+            &session,
+            "prepare_categorization_rule_change",
+            serde_json::json!({"ruleId":saved["id"],"changes":changes}),
+        )
+        .await
+        .is_empty());
+    }
+    // A draft can name the payee from the start.
+    let payee_draft = mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "create_categorization_rule",
+        serde_json::json!({"pattern":"","taxonomyId":"spending_categories","categoryKey":key,"payeeConditionId":payee}),
+    )
+    .await;
+    assert_eq!(payee_draft["rule"]["payeeConditionId"], payee);
+    assert_eq!(payee_draft["payeeConditionName"], "Synthetic payee");
+    let payee_rule = mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "commit_categorization_rule",
+        serde_json::json!({"rule":payee_draft["rule"]}),
+    )
+    .await["created"]
+        .clone();
+    assert_eq!(payee_rule["pattern"], "(?!)");
+    assert_eq!(payee_rule["payeeConditionId"], payee);
+    let payee_rule_deletion = mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "prepare_categorization_rule_change",
+        serde_json::json!({"ruleId":payee_rule["id"],"changes":null}),
+    )
+    .await;
+    mcp_call_tool(
+        &server,
+        &pat,
+        &session,
+        "commit_categorization_rule_change",
+        payee_rule_deletion["change"].clone(),
+    )
+    .await;
     let deletion = mcp_call_tool(
         &server,
         &pat,

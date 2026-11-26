@@ -14,6 +14,7 @@ use uuid::Uuid;
 use crate::env::AgentEnvironment;
 use crate::scope::AgentScope;
 use crate::tool::{AgentTool, AgentToolAccess, AgentToolError, AgentToolResult};
+use wealthfolio_spending::activity_assignments::PAYEES_TAXONOMY;
 use wealthfolio_spending::categorization_rules::{
     compile_regex_pattern, NewCategorizationRule, RuleMatchType, MAX_REGEX_PATTERN_LEN,
 };
@@ -46,6 +47,14 @@ pub struct CreateCategorizationRuleArgs {
     /// Optional: restrict the rule to one account. Omit for a global rule.
     #[serde(default)]
     pub account_id: Option<String>,
+    /// Optional: only match activities filed under this payee. With it,
+    /// `pattern` may be empty: the rule then matches on the payee alone.
+    #[serde(default)]
+    pub payee_condition_id: Option<String>,
+    /// Optional: a payee the rule also sets, beside its category. Not with
+    /// `payeeConditionId`.
+    #[serde(default)]
+    pub set_payee_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +65,11 @@ pub struct CreateCategorizationRuleOutput {
     pub rule: NewCategorizationRule,
     pub category_path: String,
     pub account_name: Option<String>,
+    /// Names of the payees the rule matches on or sets, for the review widget.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payee_condition_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub set_payee_name: Option<String>,
     pub message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub submitted: Option<bool>,
@@ -88,8 +102,22 @@ impl CreateCategorizationRule {
             args.pattern.chars().count()
         );
 
+        let payee_id = |id: &Option<String>| {
+            id.as_deref()
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+        };
+        let payee_condition_id = payee_id(&args.payee_condition_id);
+        let set_payee_id = payee_id(&args.set_payee_id);
+        if payee_condition_id.is_some() && set_payee_id.is_some() {
+            return Err(AgentToolError::ExecutionFailed(
+                "a rule with payeeConditionId cannot also set a payee".to_string(),
+            ));
+        }
+
         let pattern = args.pattern.trim().to_string();
-        if pattern.is_empty() {
+        if pattern.is_empty() && payee_condition_id.is_none() {
             return Err(AgentToolError::ExecutionFailed(
                 "pattern is required and cannot be empty".to_string(),
             ));
@@ -169,13 +197,39 @@ impl CreateCategorizationRule {
             None => RuleMatchType::Contains,
             Some(_) => RuleMatchType::Contains,
         };
-        if matches!(match_type, RuleMatchType::Regex) {
+        if !pattern.is_empty() && matches!(match_type, RuleMatchType::Regex) {
             compile_regex_pattern(&pattern).map_err(|_| {
                 AgentToolError::ExecutionFailed("invalid regex pattern".to_string())
             })?;
         }
 
+        // Resolve the payees the rule names, for its name and message.
+        let payee_name = |id: &Option<String>| -> Result<Option<String>, AgentToolError> {
+            let Some(id) = id else {
+                return Ok(None);
+            };
+            taxonomies
+                .iter()
+                .find(|entry| entry.taxonomy.id == PAYEES_TAXONOMY)
+                .and_then(|entry| entry.categories.iter().find(|payee| &payee.id == id))
+                .map(|payee| Some(payee.name.clone()))
+                .ok_or_else(|| {
+                    AgentToolError::ExecutionFailed(
+                        "Unknown payee; select one from get_spending_context".into(),
+                    )
+                })
+        };
+        let payee_condition_name = payee_name(&payee_condition_id)?;
+        let set_payee_name = payee_name(&set_payee_id)?;
+
         let category_path = path_parts.join(" / ");
+
+        // What the rule matches, in words: its text, its payee, or both.
+        let subject = match (&payee_condition_name, pattern.is_empty()) {
+            (Some(payee), true) => payee.clone(),
+            (Some(payee), false) => format!("{pattern} ({payee})"),
+            (None, _) => pattern.clone(),
+        };
 
         // Default name when missing or whitespace: "{pattern} → {category_path}".
         let name = args
@@ -184,7 +238,7 @@ impl CreateCategorizationRule {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string)
-            .unwrap_or_else(|| format!("{} → {}", pattern, category_path));
+            .unwrap_or_else(|| format!("{} → {}", subject, category_path));
 
         let account_id = args
             .account_id
@@ -227,8 +281,8 @@ impl CreateCategorizationRule {
             amount_op: None,
             amount_value: None,
             amount_value2: None,
-            payee_condition_id: None,
-            set_payee_id: None,
+            payee_condition_id,
+            set_payee_id,
             priority: 0,
             is_global: account_id.is_none(),
             account_id,
@@ -237,10 +291,25 @@ impl CreateCategorizationRule {
             preset_version: None,
         };
 
-        let message = format!(
-            "Drafted rule: anything matching \"{}\" will be {}.",
-            new_rule.pattern, category_path
-        );
+        let message = match (&payee_condition_name, new_rule.pattern.is_empty()) {
+            (Some(payee), true) => format!(
+                "Drafted rule: anything paid to or received from \"{payee}\" will be {category_path}."
+            ),
+            (Some(payee), false) => format!(
+                "Drafted rule: anything matching \"{}\" with payee \"{payee}\" will be {category_path}.",
+                new_rule.pattern
+            ),
+            (None, _) => match &set_payee_name {
+                Some(payee) => format!(
+                    "Drafted rule: anything matching \"{}\" will be {category_path}, with payee \"{payee}\".",
+                    new_rule.pattern
+                ),
+                None => format!(
+                    "Drafted rule: anything matching \"{}\" will be {}.",
+                    new_rule.pattern, category_path
+                ),
+            },
+        };
 
         Ok(CreateCategorizationRuleOutput {
             draft_status: "draft".to_string(),
@@ -248,6 +317,8 @@ impl CreateCategorizationRule {
             rule: new_rule,
             category_path,
             account_name,
+            payee_condition_name,
+            set_payee_name,
             message,
             submitted: None,
             submitted_at: None,
@@ -297,6 +368,14 @@ impl AgentTool for CreateCategorizationRule {
                 "accountId": {
                     "type": "string",
                     "description": "Optional account ID when the user explicitly scopes the rule to one account."
+                },
+                "payeeConditionId": {
+                    "type": "string",
+                    "description": "Optional payee ID (from get_spending_context payees): the rule only matches activities filed under this payee. With it, pattern may be \"\" to match on the payee alone (e.g. \"everything from Amazon is Shopping\")."
+                },
+                "setPayeeId": {
+                    "type": "string",
+                    "description": "Optional payee ID the rule also sets, beside its category. Cannot be combined with payeeConditionId."
                 }
             },
             "required": ["pattern", "taxonomyId", "categoryKey"]
@@ -319,7 +398,14 @@ impl AgentTool for CreateCategorizationRule {
         // any future arg is excluded by default rather than leaked.
         let mut redacted = serde_json::Map::new();
         if let Some(obj) = args.as_object() {
-            for key in ["matchType", "categoryKey", "taxonomyId", "activityType"] {
+            for key in [
+                "matchType",
+                "categoryKey",
+                "taxonomyId",
+                "activityType",
+                "payeeConditionId",
+                "setPayeeId",
+            ] {
                 if let Some(value) = obj.get(key) {
                     redacted.insert(key.to_string(), value.clone());
                 }

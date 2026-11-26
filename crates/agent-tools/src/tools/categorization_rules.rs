@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
+use wealthfolio_spending::activity_assignments::PAYEES_TAXONOMY;
 use wealthfolio_spending::categorization_rules::{CategorizationRule, RuleAmountOp, RuleMatchType};
 
 use crate::env::AgentEnvironment;
@@ -49,6 +50,16 @@ pub struct CategorizationRuleDto {
     pub amount_op: Option<RuleAmountOp>,
     pub amount_value: Option<Decimal>,
     pub amount_value2: Option<Decimal>,
+    /// The rule only matches activities filed under this payee.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payee_condition_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payee_condition_name: Option<String>,
+    /// A payee the rule also sets, beside its category.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_payee_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_payee_name: Option<String>,
     pub priority: i32,
     pub is_global: bool,
     pub account_id: Option<String>,
@@ -97,7 +108,15 @@ fn to_dto(
         ORIGIN_USER
     };
     let from_preset = origin == ORIGIN_PRESET;
+    let payee_name = |payee_id: &Option<String>| {
+        payee_id
+            .as_ref()
+            .and_then(|id| categories.get(&(PAYEES_TAXONOMY.to_string(), id.clone())))
+            .map(|(_, name)| name.clone())
+    };
     CategorizationRuleDto {
+        payee_condition_name: payee_name(&rule.payee_condition_id),
+        set_payee_name: payee_name(&rule.set_payee_id),
         category_key: category.map(|(key, _)| key.clone()),
         category_name: category.map(|(_, name)| name.clone()),
         origin: origin.to_string(),
@@ -115,6 +134,8 @@ fn to_dto(
         amount_op: rule.amount_op,
         amount_value: rule.amount_value,
         amount_value2: rule.amount_value2,
+        payee_condition_id: rule.payee_condition_id,
+        set_payee_id: rule.set_payee_id,
         priority: rule.priority,
         is_global: rule.is_global,
         account_id: rule.account_id,
@@ -154,8 +175,12 @@ impl AgentTool for ListCategorizationRules {
          (origin user/preset/addon). Each rule matches an activity's notes by \
          `pattern` and `matchType`, optionally only for one `activityType`, an \
          amount condition or one account, and assigns `categoryId` in \
-         `taxonomyId`. When several rules match, the highest `priority` wins; \
-         rules are returned in that order. list_categorization_context already \
+         `taxonomyId`. A rule with `payeeConditionId` only matches activities \
+         filed under that payee; when it has no text condition its `pattern` \
+         is the placeholder `(?!)` with matchType regex. `setPayeeId` is a \
+         payee the rule also sets. When several rules match, the highest \
+         `priority` wins, then the more specific rule (payee condition, exact, \
+         starts_with, then contains/regex); rules are returned in priority order. list_categorization_context already \
          applies these rules, so rows they match do not appear in its \
          `unproposed` list. To apply a rule's category yourself, use \
          propose_transaction_categories and commit_transaction_categories; to \
@@ -227,8 +252,10 @@ impl AgentTool for ListCategorizationRules {
             .into_iter()
             .filter(|entry| {
                 entry.taxonomy.scope == "activity"
-                    && wealthfolio_core::taxonomies::TRANSACTION_CATEGORY_TAXONOMY_IDS
+                    && (wealthfolio_core::taxonomies::TRANSACTION_CATEGORY_TAXONOMY_IDS
                         .contains(&entry.taxonomy.id.as_str())
+                        // Payees, to name the ones a rule matches on or sets.
+                        || entry.taxonomy.id == PAYEES_TAXONOMY)
             })
             .flat_map(|entry| entry.categories)
             .map(|cat| ((cat.taxonomy_id, cat.id), (cat.key, cat.name)))

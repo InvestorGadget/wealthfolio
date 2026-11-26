@@ -7,9 +7,10 @@
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use wealthfolio_spending::activity_assignments::PAYEES_TAXONOMY;
 use wealthfolio_spending::categorization_rules::{
-    compile_regex_pattern, CategorizationRule, NewCategorizationRule, RuleMatchType,
-    MAX_REGEX_PATTERN_LEN,
+    compile_regex_pattern, is_text_condition, CategorizationRule, NewCategorizationRule,
+    RuleMatchType, MAX_REGEX_PATTERN_LEN,
 };
 
 use crate::env::AgentEnvironment;
@@ -36,7 +37,9 @@ fn validate_draft(rule: &NewCategorizationRule) -> Result<(), AgentToolError> {
             "rule.id from create_categorization_rule is required".to_string(),
         ));
     }
-    if rule.pattern.trim().is_empty() {
+    // A rule that matches on a payee can go without a text condition.
+    let has_text_condition = is_text_condition(rule.match_type, &rule.pattern);
+    if !has_text_condition && rule.payee_condition_id.is_none() {
         return Err(AgentToolError::InvalidInput(
             "rule.pattern cannot be empty".to_string(),
         ));
@@ -46,7 +49,7 @@ fn validate_draft(rule: &NewCategorizationRule) -> Result<(), AgentToolError> {
             "rule.pattern must be {MAX_REGEX_PATTERN_LEN} characters or fewer"
         )));
     }
-    if matches!(rule.match_type, RuleMatchType::Regex) {
+    if has_text_condition && matches!(rule.match_type, RuleMatchType::Regex) {
         compile_regex_pattern(&rule.pattern).map_err(|_| {
             AgentToolError::InvalidInput("rule.pattern is not a valid regex".to_string())
         })?;
@@ -110,6 +113,26 @@ pub(super) async fn validate_target(
             "Rule category must belong to the chosen taxonomy".into(),
         ));
     }
+    let named_payees: Vec<&String> = [&rule.payee_condition_id, &rule.set_payee_id]
+        .into_iter()
+        .flatten()
+        .collect();
+    if !named_payees.is_empty() {
+        let payees = env
+            .taxonomy_service()
+            .get_taxonomy(PAYEES_TAXONOMY)
+            .map_err(|_| AgentToolError::ExecutionFailed("Unable to resolve rule payee".into()))?
+            .map(|entry| entry.categories)
+            .unwrap_or_default();
+        if named_payees
+            .into_iter()
+            .any(|id| !payees.iter().any(|payee| &payee.id == id))
+        {
+            return Err(AgentToolError::InvalidInput(
+                "Rule payee must be an existing payee".into(),
+            ));
+        }
+    }
     if let Some(id) = &rule.account_id {
         let accounts = env
             .cash_activity_service()
@@ -153,7 +176,7 @@ impl AgentTool for CommitCategorizationRule {
                     "properties": {
                         "id": { "type": "string" },
                         "name": { "type": "string" },
-                        "pattern": { "type": "string", "minLength": 1, "maxLength": MAX_REGEX_PATTERN_LEN },
+                        "pattern": { "type": "string", "maxLength": MAX_REGEX_PATTERN_LEN, "description": "Text condition. May be empty only when payeeConditionId is set." },
                         "matchType": { "type": "string", "enum": ["contains", "starts_with", "exact", "regex"] },
                         "taxonomyId": { "type": ["string", "null"] },
                         "categoryId": { "type": ["string", "null"] },
@@ -161,6 +184,8 @@ impl AgentTool for CommitCategorizationRule {
                         "amountOp": { "type": ["string", "null"], "enum": ["eq", "gt", "gte", "lt", "lte", "between", null] },
                         "amountValue": { "type": ["string", "number", "null"] },
                         "amountValue2": { "type": ["string", "number", "null"] },
+                        "payeeConditionId": { "type": ["string", "null"], "description": "Only match activities filed under this payee. Cannot be combined with setPayeeId." },
+                        "setPayeeId": { "type": ["string", "null"], "description": "A payee the rule also sets, beside its category." },
                         "priority": { "type": "integer" },
                         "isGlobal": { "type": "boolean" },
                         "accountId": { "type": ["string", "null"] },

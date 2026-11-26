@@ -30,6 +30,12 @@ expression: snapshot
       "pattern": {
         "type": "string"
       },
+      "payeeConditionId": {
+        "type": "string"
+      },
+      "setPayeeId": {
+        "type": "string"
+      },
       "taxonomyId": {
         "type": "string"
       }
