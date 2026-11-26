@@ -12,11 +12,14 @@ ALTER TABLE activities ADD COLUMN imported_description TEXT;
 --     import run or a provider record id, the rule `Activity::is_broker_synced`
 --     applies.
 -- Manual entries, and rows from before sources were recorded (NULL source and
--- no import run or record id), keep NULL: their notes are the user's own.
+-- no import run or record id), keep NULL: their notes are the user's own. So
+-- does an imported row the user has edited, whose notes may no longer be the
+-- bank's text; rules keep matching its notes.
 UPDATE activities
 SET imported_description = notes
 WHERE notes IS NOT NULL
   AND TRIM(notes) <> ''
+  AND is_user_modified = 0
   AND (
     UPPER(TRIM(COALESCE(source_system, ''))) = 'CSV'
     OR (

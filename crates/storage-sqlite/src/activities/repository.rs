@@ -232,6 +232,26 @@ fn is_broker_origin_activity(activity: &ActivityDB) -> bool {
             .is_some_and(|value| !value.trim().is_empty())
 }
 
+/// Fills the imported description of activities an import or sync created
+/// and the user has not edited, from their notes. The backfill of migration
+/// `2026-11-26-000001_activity_imported_description`, run again after
+/// restoring a snapshot taken before the column existed.
+pub(crate) const IMPORTED_DESCRIPTION_BACKFILL_SQL: &str = "UPDATE activities
+SET imported_description = notes
+WHERE notes IS NOT NULL
+  AND TRIM(notes) <> ''
+  AND is_user_modified = 0
+  AND (
+    UPPER(TRIM(COALESCE(source_system, ''))) = 'CSV'
+    OR (
+      UPPER(TRIM(COALESCE(source_system, ''))) <> 'MANUAL'
+      AND (
+        TRIM(COALESCE(import_run_id, '')) <> ''
+        OR TRIM(COALESCE(source_record_id, '')) <> ''
+      )
+    )
+  );";
+
 /// Stores `description` as the activity's imported description when it has
 /// none, and tells other devices when the activity itself syncs. A stored one
 /// is never replaced. Returns whether the row was filled.
@@ -3443,9 +3463,12 @@ impl ActivityRepositoryTrait for ActivityRepository {
                             activities::needs_review.eq(excluded(activities::needs_review)),
                             activities::idempotency_key.eq(excluded(activities::idempotency_key)),
                             activities::import_run_id.eq(excluded(activities::import_run_id)),
-                            // Kept once stored; a later sync only fills an empty one.
+                            // The row is not user-modified here (those are
+                            // skipped above), so the provider's text is
+                            // refreshed with the notes; a sync that sends none
+                            // keeps the stored one.
                             activities::imported_description.eq(sql::<Nullable<Text>>(
-                                "COALESCE(activities.imported_description, excluded.imported_description)",
+                                "COALESCE(excluded.imported_description, activities.imported_description)",
                             )),
                             activities::updated_at.eq(now_update),
                         ))
@@ -8540,10 +8563,28 @@ mod tests {
             .expect("insert activity");
         }
 
+        // An imported row the user already edited: its notes are theirs now.
+        diesel::sql_query(
+            "INSERT INTO activities \
+             (id, account_id, activity_type, status, activity_date, amount, currency, notes, \
+              source_system, is_user_modified, needs_review, created_at, updated_at) \
+             VALUES ('csv-edited', 'acc-bank', 'WITHDRAWAL', 'POSTED', '2026-01-01T00:00:00Z', \
+                     '10', 'USD', 'Weekly shop', 'CSV', 1, 0, '2026-01-01T00:00:00Z', \
+                     '2026-01-01T00:00:00Z')",
+        )
+        .execute(&mut conn)
+        .expect("insert edited activity");
+
         conn.batch_execute(include_str!(
             "../../migrations/2026-11-26-000001_activity_imported_description/up.sql"
         ))
         .expect("migrate");
+        assert_eq!(imported_description_of(&mut conn, "csv-edited"), None);
+        // A snapshot restore reruns this backfill from the shared statement.
+        assert!(include_str!(
+            "../../migrations/2026-11-26-000001_activity_imported_description/up.sql"
+        )
+        .contains(IMPORTED_DESCRIPTION_BACKFILL_SQL));
 
         for (id, _, _, _, notes) in rows {
             let imported = matches!(
@@ -8669,6 +8710,63 @@ mod tests {
         );
     }
 
+    /// Like the notes, the provider's text follows a reworded record until the
+    /// user edits the row; a sync that sends no text keeps the stored one.
+    #[tokio::test]
+    async fn a_sync_refreshes_the_imported_description_of_an_unedited_row() {
+        let (pool, writer, _dir) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account(&mut conn, "acc-bank");
+
+        repo.bulk_upsert(vec![bank_upsert("txn", "PENDING NETFLIX")])
+            .await
+            .expect("first sync");
+        // Matched by source record under another id, as a reissued record is.
+        let reissued = repo
+            .bulk_upsert(vec![bank_upsert(
+                "txn-reissued",
+                "NETFLIX.COM 866-579-7172",
+            )])
+            .await
+            .expect("reworded");
+        assert_eq!(reissued.updated, 1, "{reissued:?}");
+        let row = repo.get_activity("txn").expect("row");
+        assert_eq!(row.notes.as_deref(), Some("NETFLIX.COM 866-579-7172"));
+        assert_eq!(
+            row.imported_description.as_deref(),
+            Some("NETFLIX.COM 866-579-7172")
+        );
+
+        let mut without_text = bank_upsert("txn", "Netflix");
+        without_text.imported_description = None;
+        repo.bulk_upsert(vec![without_text])
+            .await
+            .expect("sync without text");
+        assert_eq!(
+            imported_description_of(&mut conn, "txn").as_deref(),
+            Some("NETFLIX.COM 866-579-7172")
+        );
+
+        repo.update_activity(ActivityUpdate {
+            activity_date: "2026-01-15T00:00:00Z".to_string(),
+            ..notes_update("txn", "Streaming")
+        })
+        .await
+        .expect("user edit");
+        let skipped = repo
+            .bulk_upsert(vec![bank_upsert("txn", "NETFLIX REWORDED")])
+            .await
+            .expect("sync after the edit");
+        assert_eq!(skipped.skipped, 1, "{skipped:?}");
+        let row = repo.get_activity("txn").expect("row");
+        assert_eq!(row.notes.as_deref(), Some("Streaming"));
+        assert_eq!(
+            row.imported_description.as_deref(),
+            Some("NETFLIX.COM 866-579-7172")
+        );
+    }
+
     #[tokio::test]
     async fn a_later_sync_fills_an_empty_imported_description_and_keeps_a_stored_one() {
         let (pool, writer, _dir) = setup_db();
@@ -8686,7 +8784,8 @@ mod tests {
             Some("NETFLIX.COM 866-579-7172")
         );
 
-        // The provider rewords the record: the notes follow, the first text stays.
+        // The provider rewords the record the user has not edited: both follow
+        // (see a_sync_refreshes_the_imported_description_of_an_unedited_row).
         let refreshed = repo
             .bulk_upsert(vec![bank_upsert("txn", "Netflix")])
             .await
@@ -8694,10 +8793,7 @@ mod tests {
         assert_eq!(refreshed.updated, 1);
         let row = repo.get_activity("txn").expect("row");
         assert_eq!(row.notes.as_deref(), Some("Netflix"));
-        assert_eq!(
-            row.imported_description.as_deref(),
-            Some("NETFLIX.COM 866-579-7172")
-        );
+        assert_eq!(row.imported_description.as_deref(), Some("Netflix"));
 
         // A row stored without one, as before the column, is filled by the next sync.
         diesel::update(activities::table.find("txn"))

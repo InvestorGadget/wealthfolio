@@ -4153,6 +4153,16 @@ impl AppSyncRepository {
                         }
                         if plan.table == "activities" {
                             normalize_restored_type_overrides(conn)?;
+                            // A snapshot from before the imported description
+                            // gets the backfill its migration would have run.
+                            if !load_table_columns(conn, &snapshot_alias, "activities")?
+                                .iter()
+                                .any(|column| column == IMPORTED_DESCRIPTION_COLUMN)
+                            {
+                                diesel::sql_query(crate::activities::IMPORTED_DESCRIPTION_BACKFILL_SQL)
+                                    .execute(conn)
+                                    .map_err(|err| restore_sql_error("copy", &plan.table, err))?;
+                            }
                         }
 
                         let state_row = SyncTableStateDB {
@@ -6342,6 +6352,89 @@ mod tests {
 
         assert_eq!(repo.get_cursor().expect("cursor"), 88);
         assert_eq!(count_account_rows(&pool, "acc-from-snapshot"), 1);
+    }
+
+    /// A snapshot taken before the imported description gets the migration's
+    /// backfill once restored; one that has the column is restored as it is.
+    #[tokio::test]
+    async fn snapshot_restore_backfills_imported_descriptions_only_when_the_snapshot_lacks_them() {
+        let description = |pool: &Arc<Pool<r2d2::ConnectionManager<SqliteConnection>>>,
+                           id: &str| {
+            crate::schema::activities::table
+                .find(id)
+                .select(crate::schema::activities::imported_description)
+                .first::<Option<String>>(&mut get_connection(pool).expect("conn"))
+                .expect("restored activity")
+        };
+        for snapshot_has_column in [false, true] {
+            let (snapshot_path, _snapshot_dir) = create_snapshot_db_with_account("acc-bank");
+            let snapshot_pool = create_pool(&snapshot_path).expect("snapshot pool");
+            let mut snapshot = get_connection(&snapshot_pool).expect("snapshot conn");
+            // (id, source_system, is_user_modified, notes, imported_description)
+            let rows = [
+                ("imported", "CSV", 0, "TESCO STORES 3301", None),
+                ("edited", "CSV", 1, "Weekly shop", None),
+                ("manual", "MANUAL", 0, "Lunch with Sam", None),
+                ("kept", "CSV", 0, "Fuel", Some("SHELL 0042")),
+            ];
+            for (id, source, modified, notes, description) in rows {
+                snapshot
+                    .batch_execute(&format!(
+                        "INSERT INTO activities \
+                         (id, account_id, activity_type, status, activity_date, amount, currency, \
+                          notes, imported_description, source_system, is_user_modified, needs_review, \
+                          created_at, updated_at) \
+                         VALUES ('{id}', 'acc-bank', 'WITHDRAWAL', 'POSTED', '2026-01-01T00:00:00Z', \
+                                 '10', 'USD', '{notes}', {}, '{source}', {modified}, 0, \
+                                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                        description.map_or("NULL".to_string(), |text| format!("'{text}'")),
+                    ))
+                    .expect("insert snapshot activity");
+            }
+            if !snapshot_has_column {
+                snapshot
+                    .batch_execute(include_str!(
+                        "../../../migrations/2026-11-26-000001_activity_imported_description/down.sql"
+                    ))
+                    .expect("snapshot from before the column");
+            }
+            drop(snapshot);
+
+            let (pool, writer, _dir) = setup_db();
+            let repo = AppSyncRepository::new(pool.clone(), writer);
+            repo.restore_snapshot_tables_from_file(
+                snapshot_path,
+                APP_SYNC_TABLES
+                    .iter()
+                    .map(|table| table.to_string())
+                    .collect(),
+                7,
+                "device-1".to_string(),
+                Some(1),
+            )
+            .await
+            .expect("restore snapshot");
+
+            let restored: Vec<Option<String>> = ["imported", "edited", "manual", "kept"]
+                .into_iter()
+                .map(|id| description(&pool, id))
+                .collect();
+            let expected = if snapshot_has_column {
+                // As the snapshot holds them: no backfill over a newer snapshot.
+                vec![None, None, None, Some("SHELL 0042".to_string())]
+            } else {
+                vec![
+                    Some("TESCO STORES 3301".to_string()),
+                    None,
+                    None,
+                    Some("Fuel".to_string()),
+                ]
+            };
+            assert_eq!(
+                restored, expected,
+                "snapshot_has_column={snapshot_has_column}"
+            );
+        }
     }
 
     #[tokio::test]
