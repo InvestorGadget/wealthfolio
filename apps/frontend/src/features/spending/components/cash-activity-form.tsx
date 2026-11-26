@@ -7,11 +7,11 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { useEffectOnChange } from "@/hooks/use-effect-on-change";
-import { createActivity, updateActivity } from "@/adapters";
+import { createActivity, findTransferMatchCandidates, updateActivity } from "@/adapters";
 import { useAccounts } from "@/hooks/use-accounts";
 import { useIsMobileViewport, usePlatform } from "@/hooks/use-platform";
 import { accountPickerItems } from "@/components/account-picker-items";
@@ -28,9 +28,12 @@ import type {
   ActivityUpdate,
   TaxonomyCategory,
 } from "@/lib/types";
+import { getEffectiveType } from "@/lib/types";
 import { invalidTypeError, requiredError } from "@/lib/zod-errors";
 
 import {
+  Alert,
+  AlertDescription,
   Button,
   DatePickerInput,
   Form,
@@ -61,6 +64,8 @@ import {
   SheetTitle,
   Textarea,
   Spinner,
+  useAmountFormatting,
+  useDateFormatting,
 } from "@wealthfolio/ui";
 
 import {
@@ -68,18 +73,20 @@ import {
   setActivityEvent,
   unassignActivityCategory,
 } from "../adapters/cash-activities";
+import { useActivityPayee } from "../hooks/use-activity-payee";
+import { PAYEES_TAXONOMY_ID, setActivityPayee } from "../lib/payee";
+import { PayeeField } from "./payee-field";
 import {
   getActivityTypesForAccount,
   getCashActivityLabel,
   isCreditCardAccountType,
   isCashActivityIncome,
+  isCashActivityOutflow,
   isSpendingAccountType,
 } from "../lib/constants";
 import { useEventTypes, useSpendingEvents } from "../hooks/use-spending-events";
 import { useSettings } from "@/hooks/use-settings";
 import { AdvancedOptionsSection } from "@/pages/activity/components/forms/fields/advanced-options-section";
-import { canConvertToTransfer } from "@/pages/activity/components/transfer-link-utils";
-import { CashActivityReclassification } from "@/pages/activity/components/cash-activity-reclassification";
 import { useSpendingSettings } from "../hooks/use-spending-settings";
 import { CategoryIconTile } from "./category-chips";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
@@ -87,6 +94,8 @@ import { QuickEventPopover } from "./quick-event-popover";
 import type { ActivitySplit, CashFlowBucket } from "../types/cash-activity";
 import {
   cashActivityFlowMetadata,
+  describeTypeChange,
+  linkableTransferType,
   resolveCashActivitySubtype,
 } from "../lib/cash-activity-form-utils";
 
@@ -195,18 +204,49 @@ interface CashActivityFormProps {
   };
   /** Called when user selects Transfer in creation mode; receives the selected spending account id */
   onTransferClick?: (accountId: string) => void;
-  /** Called to pair the saved deposit or withdrawal with another account as a transfer. */
-  onConvertToTransfer?: () => void;
+  /**
+   * Called to link the saved row with the other account's side, a transfer's
+   * other leg. `counterpartId` is the suggested match to select. When the
+   * form saved the row first, `saved` is the row as it is now.
+   */
+  onLinkTransfer?: (counterpartId?: string, saved?: Activity) => void;
   /** A known creation action opens directly on its details. */
   intent?: "expense" | "income";
 }
+
+/**
+ * What the saves of one opening of the form have got to write. A save writes
+ * the transaction, then its category, event and payee, and can fail between
+ * two of them: the next one starts from what is on file by then.
+ */
+interface SaveSession {
+  /** The new transaction, once a save has created it. */
+  createdId: string | null;
+  /** An edit is on file that the lists have not been refreshed for. */
+  unrefreshed: boolean;
+  /** A save succeeded while this was still the form's opening, and closed it. */
+  closedBySave: boolean;
+  /** Each one as last written; unset while it is still as the form opened with. */
+  written: {
+    /** `taxonomyId:categoryId`, or "" for none. */
+    category?: string;
+    eventId?: string | null;
+    payeeName?: string;
+  };
+}
+const newSaveSession = (): SaveSession => ({
+  createdId: null,
+  unrefreshed: false,
+  closedBySave: false,
+  written: {},
+});
 
 export function CashActivityForm({
   open,
   onOpenChange,
   activity,
   onTransferClick,
-  onConvertToTransfer,
+  onLinkTransfer,
   intent,
 }: CashActivityFormProps) {
   const { t } = useTranslation();
@@ -214,6 +254,11 @@ export function CashActivityForm({
   const reviewEdits = useActivitySplitReview();
   const formSchema = useMemo(() => buildFormSchema(t), [t]);
   const isEditing = !!activity?.id;
+  // The type the row shows: a synced row keeps its source type and stores the
+  // user's choice as an override, which is the one to edit and compare with.
+  const savedType = activity
+    ? (getEffectiveType(activity) as FormValues["activityType"])
+    : undefined;
   const isQuickEntry = !isEditing && !!intent;
   const initialType = intent === "income" ? "DEPOSIT" : "WITHDRAWAL";
   const isMobile = useIsMobileViewport();
@@ -277,6 +322,30 @@ export function CashActivityForm({
   // Event id stored separately (not part of the form schema since it's persisted
   // via setActivityEvent rather than the activity create/update payload).
   const [eventId, setEventId] = useState<string | null>(activity?.eventId ?? null);
+  // The payee is kept beside the form for the same reason: it is saved as an
+  // assignment, after the activity. `savedPayeeName` is what is on file.
+  const { payees, payeeName: savedPayeeName } = useActivityPayee(activity?.id ?? null);
+  const [payeeName, setPayeeName] = useState(savedPayeeName);
+  // The payee on file can load after the user has picked one: it seeds the
+  // field only until they do.
+  const payeeEdited = useRef(false);
+  // A save that failed part-way has written some of the transaction. The next
+  // one carries on from there: it does not create the transaction again, and it
+  // compares each choice with what was written, not with what the form opened
+  // with. The record belongs to one opening of the form: a save still running
+  // when the form is opened again reports to the opening it started in.
+  const session = useRef(newSaveSession());
+  useEffectOnChange(() => {
+    if (open) payeeEdited.current = false;
+    session.current = newSaveSession();
+  }, [open, activity?.id]);
+  useEffect(() => {
+    if (open && !payeeEdited.current) setPayeeName(savedPayeeName);
+  }, [open, activity?.id, savedPayeeName]);
+  const changePayeeName = (name: string) => {
+    payeeEdited.current = true;
+    setPayeeName(name);
+  };
   const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
   // The amount starts at 0 in the form, but shows as an empty field with a grey "0"
   // hint until something is typed, and again once it is cleared.
@@ -293,7 +362,7 @@ export function CashActivityForm({
     resolver: zodResolver(formSchema) as Resolver<FormValues>,
     defaultValues: {
       accountId: activity?.accountId ?? "",
-      activityType: (activity?.activityType as FormValues["activityType"]) ?? initialType,
+      activityType: savedType ?? initialType,
       activityDate: activity?.activityDate ? new Date(activity.activityDate) : new Date(),
       amount: activity?.amount != null ? Math.abs(parseFloat(activity.amount)) : 0,
       currency: activity?.currency ?? "",
@@ -312,7 +381,7 @@ export function CashActivityForm({
         accountId:
           activity?.accountId ??
           (isQuickEntry && spendingAccounts.length !== 1 ? "" : (spendingAccounts[0]?.id ?? "")),
-        activityType: (activity?.activityType as FormValues["activityType"]) ?? initialType,
+        activityType: savedType ?? initialType,
         activityDate: activity?.activityDate ? new Date(activity.activityDate) : new Date(),
         amount: activity?.amount != null ? Math.abs(parseFloat(activity.amount)) : 0,
         // Seeded from the activity, not the account: recomputing it on save is
@@ -333,7 +402,7 @@ export function CashActivityForm({
       setAmountTyped(false);
       setAmountTapped(false);
     }
-  }, [open, activity, spendingAccounts, form, initialType, isQuickEntry]);
+  }, [open, activity, savedType, spendingAccounts, form, initialType, isQuickEntry]);
 
   const watchType = form.watch("activityType");
   const watchAccountId = form.watch("accountId");
@@ -344,15 +413,12 @@ export function CashActivityForm({
     : t("spending:cashForm.transferBetween");
   const activityTypeOptions = useMemo<FormValues["activityType"][]>(() => {
     const options = getActivityTypesForAccount(selectedAccount?.accountType);
-    const currentType = activity?.activityType as FormValues["activityType"] | undefined;
+    const currentType = savedType;
     const all = currentType && !options.includes(currentType) ? [...options, currentType] : options;
-    // Transfer reclassification uses the separate action so the ordinary save
-    // cannot bypass confirmation or resubmit rounded amounts and timestamps.
-    if (isEditing && (currentType === "TRANSFER_IN" || currentType === "TRANSFER_OUT")) {
-      return [currentType];
-    }
-    return all.filter((t) => t !== "TRANSFER_IN" && t !== "TRANSFER_OUT");
-  }, [activity?.activityType, isEditing, selectedAccount?.accountType]);
+    // A saved row can become a transfer, or stop being one. A new transfer has
+    // two sides, so it is entered with the transfer action instead.
+    return isEditing ? all : all.filter((t) => t !== "TRANSFER_IN" && t !== "TRANSFER_OUT");
+  }, [savedType, isEditing, selectedAccount?.accountType]);
   const mobileTypeOptions = useMemo(
     () =>
       activityTypeOptions.map((type) => ({
@@ -364,20 +430,14 @@ export function CashActivityForm({
           resolveCashActivitySubtype({
             activityType: type,
             accountType: selectedAccount?.accountType,
-            existingActivityType: activity?.activityType,
+            existingActivityType: savedType,
             existingSubtype: activity?.subtype,
           }),
         ),
         description: getMobileTypeDescription(type, t),
         Icon: getMobileTypeIcon(type),
       })),
-    [
-      activityTypeOptions,
-      selectedAccount?.accountType,
-      activity?.activityType,
-      activity?.subtype,
-      t,
-    ],
+    [activityTypeOptions, selectedAccount?.accountType, savedType, activity?.subtype, t],
   );
   const isIncomeType = isCashActivityIncome(
     watchType,
@@ -407,8 +467,16 @@ export function CashActivityForm({
     }
   }, [activityTypeOptions, form, selectedAccount, watchType]);
 
+  const invalidateSaved = () => {
+    invalidateSpendingCaches(qc);
+    // A new name becomes a new payee, which the suggestions and filters list.
+    qc.invalidateQueries({ queryKey: QueryKeys.taxonomy(PAYEES_TAXONOMY_ID) });
+    qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] });
+    qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITY_DATA] });
+  };
   const saveMutation = useMutation({
     mutationFn: async (values: FormValues) => {
+      const saving = session.current;
       const dateStr = values.activityDate.toISOString();
       const account = spendingAccounts.find((a) => a.id === values.accountId);
       // The account's currency is only the default. Taking it unconditionally
@@ -434,7 +502,7 @@ export function CashActivityForm({
       const subtype = resolveCashActivitySubtype({
         activityType: values.activityType,
         accountType: account?.accountType,
-        existingActivityType: activity?.activityType,
+        existingActivityType: savedType,
         existingSubtype: activity?.subtype,
       });
 
@@ -450,10 +518,16 @@ export function CashActivityForm({
           currency,
           fxRate,
           comment: values.notes ?? null,
-          metadata: cashActivityFlowMetadata(values.activityType, subtype, activity?.metadata),
+          metadata: cashActivityFlowMetadata(
+            values.activityType,
+            subtype,
+            activity?.metadata,
+            savedType,
+          ),
         };
         const [reviewed] = await reviewEdits([update]);
         saved = await updateActivity(reviewed);
+        saving.unrefreshed = true;
       } else {
         const create: ActivityCreate = {
           accountId: values.accountId,
@@ -466,51 +540,88 @@ export function CashActivityForm({
           comment: values.notes ?? null,
           metadata: cashActivityFlowMetadata(values.activityType, subtype),
         };
-        saved = await createActivity(create);
+        if (saving.createdId) {
+          // An earlier attempt created it: bring it up to what the form says now.
+          saved = await updateActivity({ id: saving.createdId, ...create });
+        } else {
+          saved = await createActivity(create);
+          saving.createdId = saved.id;
+        }
       }
+      // What is on file to compare against: what an earlier attempt wrote, or
+      // else what the form opened with.
+      const written = saving.written;
 
       // Sync category assignment
       const newCategory = values.category;
       const oldCategory =
-        activity?.categoryTaxonomyId && activity?.categoryId
+        written.category ??
+        (activity?.categoryTaxonomyId && activity?.categoryId
           ? `${activity.categoryTaxonomyId}:${activity.categoryId}`
-          : "";
+          : "");
       if (newCategory !== oldCategory) {
         if (oldCategory) {
           const [oldTax] = oldCategory.split(":");
           await unassignActivityCategory(saved.id, oldTax);
+          written.category = "";
         }
         if (newCategory) {
           const [tax, cat] = newCategory.split(":");
           await assignActivityCategory(saved.id, tax, cat);
+          written.category = newCategory;
         }
       }
 
       // Sync event_id if changed
-      const oldEventId = activity?.eventId ?? null;
+      const oldEventId =
+        written.eventId !== undefined ? written.eventId : (activity?.eventId ?? null);
       if (eventId !== oldEventId) {
         await setActivityEvent(saved.id, eventId);
+        written.eventId = eventId;
       }
 
+      // Sync the payee if changed
+      const newPayeeName = payeeName.trim();
+      if (newPayeeName !== (written.payeeName ?? savedPayeeName)) {
+        await setActivityPayee(saved.id, payeeName, payees);
+        written.payeeName = newPayeeName;
+      }
+
+      saving.createdId = null;
       return saved;
     },
-    onSuccess: () => {
-      invalidateSpendingCaches(qc);
-      qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITIES] });
-      qc.invalidateQueries({ queryKey: [QueryKeys.ACTIVITY_DATA] });
-      toast.success(
-        isEditing
-          ? t("spending:cashForm.activityUpdated")
-          : intent === "expense"
-            ? t("spending:cashForm.expenseAdded")
-            : intent === "income"
-              ? t("spending:cashForm.incomeAdded")
-              : t("spending:cashForm.activityCreated"),
-      );
-      onOpenChange(false);
+    // The opening the save belongs to and what it says once saved, for when it
+    // ends in another opening, which can be of another kind of entry.
+    onMutate: () => ({
+      owner: session.current,
+      savedMessage: isEditing
+        ? t("spending:cashForm.activityUpdated")
+        : intent === "expense"
+          ? t("spending:cashForm.expenseAdded")
+          : intent === "income"
+            ? t("spending:cashForm.incomeAdded")
+            : t("spending:cashForm.activityCreated"),
+    }),
+    onSuccess: (_saved, _values, { owner, savedMessage }) => {
+      owner.unrefreshed = false;
+      invalidateSaved();
+      toast.success(savedMessage);
+      // A form dismissed or opened again since is not this save's to close.
+      if (owner === session.current) {
+        owner.closedBySave = true;
+        onOpenChange(false);
+      }
     },
-    onError: (e: unknown) => {
+    onError: (e: unknown, _values, context) => {
       if (isActivityEditCancelled(e)) return;
+      // The transaction itself may have been created before the step that failed.
+      // A failed edit is refreshed when the form is dismissed instead: a refreshed
+      // activity would reset the fields being retried. Already dismissed, there
+      // is nothing to reset and no later dismissal to refresh it.
+      const owner = context?.owner;
+      if (owner?.createdId || (owner?.unrefreshed && owner !== session.current)) {
+        invalidateSaved();
+      }
       toast.error(t("spending:cashForm.saveFailed", { message: (e as Error).message ?? e }));
     },
   });
@@ -535,24 +646,43 @@ export function CashActivityForm({
   // Read during render so the form tracks them for the close check below.
   // A successful save closes the sheet itself; a failed one leaves the input to protect.
   const { dirtyFields } = form.formState;
+  // Closes the form on the user's word. A save still running is then no longer
+  // this form's: it must not close, or navigate away from, what is opened next.
+  const dismiss = () => {
+    if (session.current.unrefreshed) invalidateSaved();
+    session.current = newSaveSession();
+    onOpenChange(false);
+  };
+  // Whether the category, event or payee differs from what is on file. After a
+  // save that failed part-way that is what it wrote, so a choice put back to
+  // what the form opened with is unsaved too.
+  const hasUnsavedLabels = () => {
+    const { written } = session.current;
+    return (
+      (written.category !== undefined && form.getValues("category") !== written.category) ||
+      eventId !== (written.eventId !== undefined ? written.eventId : (activity?.eventId ?? null)) ||
+      payeeName.trim() !== (written.payeeName ?? savedPayeeName)
+    );
+  };
   const handleSheetOpenChange = (next: boolean) => {
     // Typed input is kept unless the user says to drop it. Picking the type of a new
     // entry is not input; changing an existing one's type, or its event, is.
     const hasUnsavedInput =
       Object.keys(dirtyFields).some((field) => isEditing || field !== "activityType") ||
-      eventId !== (activity?.eventId ?? null);
+      hasUnsavedLabels();
     if (!next && hasUnsavedInput) {
       setConfirmDiscard(true);
       return;
     }
-    onOpenChange(next);
+    if (next) onOpenChange(next);
+    else dismiss();
   };
 
   const handleTransferAction = async () => {
     if (!onTransferClick) return;
     const isValid = await form.trigger("accountId");
     if (!isValid || !watchAccountId) return;
-    onOpenChange(false);
+    dismiss();
     onTransferClick(watchAccountId);
   };
 
@@ -712,33 +842,167 @@ export function CashActivityForm({
       </FormItem>
     ) : null;
 
-  // Editing a saved deposit or withdrawal: pair it with another account as a transfer.
-  const convertToTransferField =
-    isEditing && onConvertToTransfer && canConvertToTransfer(activity) ? (
-      <FormItem>
-        <FormLabel>{t("spending:cashForm.transfer")}</FormLabel>
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full justify-start gap-2"
-          onClick={() => {
-            onOpenChange(false);
-            onConvertToTransfer();
-          }}
-        >
-          <Icons.ArrowLeftRight className="h-4 w-4" />
-          {t("spending:transactions.convertToTransfer")}
-        </Button>
-      </FormItem>
-    ) : null;
+  // Changing a saved row's type says how reports will count it, before saving.
+  const typeChange =
+    isEditing && activity
+      ? describeTypeChange(
+          { activityType: savedType ?? activity.activityType, subtype: activity.subtype },
+          {
+            activityType: watchType,
+            subtype: resolveCashActivitySubtype({
+              activityType: watchType,
+              accountType: selectedAccount?.accountType,
+              existingActivityType: savedType,
+              existingSubtype: activity.subtype,
+            }),
+          },
+          selectedAccount?.accountType,
+        )
+      : null;
+  // A card's payment and advance notes already say which way the balance goes.
+  const balanceNote = !isCreditCardAccount
+    ? t("spending:cashForm.typeChange.reversesBalance")
+    : typeChange?.effect === "cardPayment" || typeChange?.effect === "cardAdvance"
+      ? null
+      : isCashActivityOutflow(watchType, selectedAccount?.accountType)
+        ? t("spending:cashForm.typeChange.owesMore")
+        : t("spending:cashForm.typeChange.owesLess");
+  const typeChangeNotice = typeChange ? (
+    <Alert>
+      <Icons.Info className="h-4 w-4" aria-hidden="true" />
+      <AlertDescription>
+        {[
+          typeChange.effect && t(`spending:cashForm.typeChange.${typeChange.effect}`),
+          typeChange.reversesBalance && balanceNote,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      </AlertDescription>
+    </Alert>
+  ) : null;
 
-  const reclassificationField = (
-    <CashActivityReclassification
-      activity={activity}
-      onSuccess={() => onOpenChange(false)}
-      disabled={saveMutation.isPending}
-    />
-  );
+  // A transfer's other side: the account the money came from or went to. A
+  // saved row links as the transfer it would become. When the chosen transfer
+  // is a different one, such as a card advance made a payment, the row saves
+  // the change first and then links. The account must be unchanged.
+  const isTransferChoice = watchType === "TRANSFER_IN" || watchType === "TRANSFER_OUT";
+  // A card's transfer has no category, nor has a neutral row until its type
+  // changes. A bank's one-sided transfer still counts under its category.
+  const showNeutralCategory =
+    (isTransferChoice && isCreditCardAccount) || (isNeutralBucket && watchType === savedType);
+  const canLink =
+    isEditing &&
+    !!activity?.id &&
+    !!onLinkTransfer &&
+    isTransferChoice &&
+    watchAccountId === activity.accountId &&
+    !!savedType;
+  const linkSavesFirst =
+    canLink && linkableTransferType(savedType, selectedAccount?.accountType) !== watchType;
+  const { data: savedSuggestion } = useQuery({
+    queryKey: ["transfer-match-suggestion", activity?.id, savedType],
+    queryFn: async () => {
+      const [first] = await findTransferMatchCandidates({
+        activityId: activity!.id,
+        windowDays: 7,
+        limit: 1,
+        includeCashFlows: true,
+      });
+      return first ?? null;
+    },
+    enabled: open && canLink && !linkSavesFirst,
+    staleTime: 30_000,
+  });
+  const formatting = useAmountFormatting();
+  const dateFormatting = useDateFormatting();
+  // The query keeps its last answer once disabled: a match found for the
+  // saved row's own transfer doesn't fit a different one chosen since.
+  const suggestedMatch = linkSavesFirst ? null : savedSuggestion;
+  const suggestedAccount = suggestedMatch
+    ? accounts?.find((account) => account.id === suggestedMatch.activity.accountId)
+    : undefined;
+  const linkRowLabel =
+    watchType === "TRANSFER_OUT"
+      ? t("spending:cashForm.linkRow.sentTo")
+      : isCreditCardAccount
+        ? t("spending:cashForm.linkRow.paidFrom")
+        : t("spending:cashForm.linkRow.receivedFrom");
+  // Leaving for the link sheet drops what was typed here, so it asks first.
+  const [pendingLink, setPendingLink] = useState<{ counterpartId?: string } | null>(null);
+  const startLink = (counterpartId?: string) => {
+    if (linkSavesFirst) {
+      // A form dismissed or opened again while it saves no longer leads to the link.
+      const owner = session.current;
+      void form.handleSubmit(async (values) => {
+        const saved = await saveMutation.mutateAsync(values).catch(() => null);
+        if (saved && owner.closedBySave) onLinkTransfer?.(undefined, saved);
+      })();
+      return;
+    }
+    const hasOtherInput =
+      Object.keys(dirtyFields).some((field) => field !== "activityType") || hasUnsavedLabels();
+    if (hasOtherInput) {
+      setPendingLink({ counterpartId });
+      return;
+    }
+    dismiss();
+    onLinkTransfer?.(counterpartId);
+  };
+  const linkField = canLink ? (
+    <FormItem className={cn(isMobile && "gap-0")}>
+      <FormLabel className={cn(isMobile && "sr-only")}>{linkRowLabel}</FormLabel>
+      <Button
+        type="button"
+        variant="field"
+        className={isMobile ? formRowClassName : pickerTriggerClassName}
+        onClick={() => startLink()}
+        disabled={saveMutation.isPending}
+      >
+        {isMobile && <FormRowLabel>{linkRowLabel}</FormRowLabel>}
+        <span className={cn("text-muted-foreground truncate", isMobile && "ms-auto")}>
+          {t("spending:cashForm.linkRow.untracked")}
+        </span>
+        {pickerChevron}
+      </Button>
+      {suggestedMatch && suggestedAccount ? (
+        <div
+          className={cn(
+            "text-muted-foreground flex items-center justify-between gap-2 text-sm",
+            isMobile && "px-4 py-2",
+          )}
+        >
+          <span className="min-w-0 truncate">
+            {t("spending:cashForm.linkRow.suggested", {
+              account: suggestedAccount.name,
+              date: dateFormatting.formatDate(suggestedMatch.activity.activityDate),
+              amount: formatting.formatAmount(
+                Math.abs(Number(suggestedMatch.activity.amount ?? 0)),
+                suggestedMatch.activity.currency,
+              ),
+            })}
+          </span>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => startLink(suggestedMatch.activity.id)}
+            disabled={saveMutation.isPending}
+          >
+            <Icons.Link className="me-1.5 h-3.5 w-3.5" aria-hidden="true" />
+            {t("spending:cashForm.linkRow.link")}
+          </Button>
+        </div>
+      ) : null}
+      {!isMobile && (
+        <p className="text-muted-foreground text-xs">
+          {linkSavesFirst
+            ? t("spending:cashForm.linkRow.savesFirst")
+            : t("spending:cashForm.linkRow.hint")}
+        </p>
+      )}
+    </FormItem>
+  ) : null;
 
   const transferCard = onTransferClick ? (
     <button
@@ -819,7 +1083,7 @@ export function CashActivityForm({
           <FormItem className={cn(isMobile && "gap-0")}>
             {" "}
             <FormLabel className={cn(isMobile && "sr-only")}>
-              {isNeutralBucket ? t("spending:filters.category") : categoryLabel}
+              {showNeutralCategory ? t("spending:filters.category") : categoryLabel}
             </FormLabel>
             {(activity?.splits?.length ?? 0) > 0 ? (
               <p
@@ -830,7 +1094,7 @@ export function CashActivityForm({
               >
                 {t("spending:split.categoryProtected")}
               </p>
-            ) : isNeutralBucket ? (
+            ) : showNeutralCategory ? (
               <div
                 className={cn(
                   "border-input bg-muted/40 text-muted-foreground h-input-height flex items-center rounded-md border px-3 py-2 text-sm",
@@ -962,6 +1226,10 @@ export function CashActivityForm({
     </FormItem>
   );
 
+  const payeeField = (
+    <PayeeField value={payeeName} onChange={changePayeeName} payees={payees} isMobile={isMobile} />
+  );
+
   const notesField = (
     <FormField
       control={form.control}
@@ -1056,7 +1324,6 @@ export function CashActivityForm({
 
   const desktopFields = (
     <div className="space-y-4">
-      {reclassificationField}
       {isQuickEntry && amountField}
       {showChoiceFields && (
         <>
@@ -1068,9 +1335,10 @@ export function CashActivityForm({
               ) : (
                 <>
                   {typeSelectField}
+                  {typeChangeNotice}
+                  {linkField}
                   {/* Transfer button — creation only, redirects to the full transfer form */}
                   {transferButtonField}
-                  {convertToTransferField}
                 </>
               )}
               {isMobileCreate && transferCard}
@@ -1084,6 +1352,7 @@ export function CashActivityForm({
           {!isQuickEntry && amountField}
           {categoryField}
           {eventField}
+          {payeeField}
           {notesField}
           {/* Collapsed by default, so the everyday case — a charge in
     the account's own currency — never sees it. Open, it
@@ -1109,7 +1378,6 @@ export function CashActivityForm({
   // sheet; currency and FX sit behind one row instead of a collapsible box.
   const mobileFields = (
     <div className="space-y-4 p-4">
-      {reclassificationField}
       {(isQuickEntry || showDetailsFields) && amountHero}
       {showChoiceFields && isMobileCreate && !isQuickEntry ? (
         <>
@@ -1126,10 +1394,14 @@ export function CashActivityForm({
           {showDetailsFields && eventField}
         </FormRowGroup>
       )}
+      {showChoiceFields && !isQuickEntry && !isMobileCreate && typeChangeNotice}
+      {showChoiceFields && !isQuickEntry && !isMobileCreate && linkField && (
+        <FormRowGroup>{linkField}</FormRowGroup>
+      )}
       {showChoiceFields && !isQuickEntry && !isMobileCreate && transferButtonField}
-      {showChoiceFields && !isQuickEntry && !isMobileCreate && convertToTransferField}
       {showDetailsFields && (
         <>
+          <FormRowGroup>{payeeField}</FormRowGroup>
           <FormRowGroup>{notesField}</FormRowGroup>
           <FormRowGroup>
             <button
@@ -1325,7 +1597,17 @@ export function CashActivityForm({
       <DiscardChangesDialog
         open={confirmDiscard}
         onOpenChange={setConfirmDiscard}
-        onDiscard={() => onOpenChange(false)}
+        onDiscard={dismiss}
+      />
+      <DiscardChangesDialog
+        open={!!pendingLink}
+        onOpenChange={(next) => !next && setPendingLink(null)}
+        onDiscard={() => {
+          const counterpartId = pendingLink?.counterpartId;
+          setPendingLink(null);
+          dismiss();
+          onLinkTransfer?.(counterpartId);
+        }}
       />
     </>
   );

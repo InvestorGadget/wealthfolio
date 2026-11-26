@@ -71,13 +71,15 @@
     "clearCategory": "清除類別"
   },
   "activityTypes": {
-    "balanceTransferCashAdvance": "餘額轉移／預借現金",
+    "balanceTransferCashAdvance": "預借現金 / 餘額代償",
     "charge": "消費",
-    "interestCharge": "利息費用",
-    "refundCredit": "退款／回饋",
+    "interestCharge": "利息",
+    "refundCredit": "退款",
     "reimbursementRefund": "費用補償／退款"
   },
   "rules": {
+    "categoryOrPayee": "類別或收款方",
+    "payeeRuleHint": "收款方規則適用於所有符合的交易，並保持其類別不變。",
     "editTitle": "編輯規則",
     "addTitle": "新增規則",
     "editDescription": "依名稱模式自動標記活動。多條規則同時符合時，會套用優先順序較高的規則。",
@@ -161,6 +163,7 @@
     "amountChipBetween": "金額介於 {{value}} 與 {{value2}} 之間"
   },
   "transactions": {
+    "filterByPayee": "顯示 {{name}} 的交易",
     "deleteTitle_one": "刪除交易",
     "deleteTitle_other": "刪除交易",
     "deleteConfirmSingle": "確定要刪除這筆 {{amount}} 的{{type}}嗎？",
@@ -579,6 +582,14 @@
     "subheading": "本月計畫、實際支出與自訂設定。"
   },
   "insightsPage": {
+    "topPayees": "主要收款方",
+    "labelFilter": {
+      "search": "搜尋收款方和事件",
+      "only": "僅",
+      "without": "排除",
+      "payee": "收款方：{{name}}",
+      "eventType": "{{name}}事件"
+    },
     "uncategorized": "未歸類",
     "heading": "支出分析",
     "loadError": "無法載入分析。",
@@ -858,6 +869,13 @@
     "manage": "管理 →"
   },
   "cashForm": {
+    "payeeBulkSet": "設定收款方",
+    "payeeSearch": "搜尋或新增收款方",
+    "payeeEmpty": "尚無收款方。輸入名稱即可新增。",
+    "payeeAdd": "新增「{{name}}」",
+    "payeeClear": "無收款方",
+    "payee": "收款方",
+    "payeePlaceholder": "這筆交易的對象是誰?",
     "none": "無",
     "addExpense": "新增支出",
     "addIncome": "新增收入",
@@ -887,7 +905,7 @@
     "addDescription": "在已追蹤支出的帳戶新增交易。",
     "selectAccount": "選取一個帳戶",
     "selectType": "選取交易類型",
-    "payment": "付款",
+    "payment": "繳款",
     "transfer": "轉帳",
     "payCardDesc": "從另一個帳戶償還此卡",
     "neutralTransfer": "中性轉帳",
@@ -898,7 +916,30 @@
     "notesPayee": "備註／收款方",
     "notesPlaceholder": "例如：AMAZON*MARKETPLACE、STARBUCKS COFFEE",
     "updateTransaction": "更新交易",
-    "createTransaction": "建立交易"
+    "createTransaction": "建立交易",
+    "typeChange": {
+      "transferOut": "計為轉出。在與另一個帳戶連結之前，報告仍將其計為支出。",
+      "transferIn": "計為轉入。在與另一個帳戶連結之前，報告仍將其計為收入。",
+      "cardPayment": "計為繳款：減少你的欠款，不算支出。",
+      "cardAdvance": "計為預借現金或餘額代償：增加你的欠款，但不算支出。",
+      "spending": "在報告中計為支出。",
+      "refund": "計為退款，會減少你的支出。",
+      "income": "在報告中計為收入。",
+      "none": "不再計入支出或收入。",
+      "reversesBalance": "餘額也會朝相反方向變動。",
+      "owesMore": "現在會增加你的欠款。",
+      "owesLess": "現在會減少你的欠款。"
+    },
+    "linkRow": {
+      "paidFrom": "付款帳戶",
+      "receivedFrom": "來源帳戶",
+      "sentTo": "轉入帳戶",
+      "untracked": "我未記錄的帳戶",
+      "suggested": "建議：{{account}} · {{date}} · {{amount}}",
+      "link": "連結",
+      "hint": "選擇另一個帳戶以連結兩邊，或保持不變。",
+      "savesFirst": "選擇帳戶會先儲存此變更，然後連結兩邊。"
+    }
   },
   "txTab": {
     "duplicatedComment": "已複製",

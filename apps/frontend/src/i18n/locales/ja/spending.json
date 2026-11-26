@@ -71,13 +71,15 @@
     "clearCategory": "カテゴリをクリア"
   },
   "activityTypes": {
-    "balanceTransferCashAdvance": "残高移行 / キャッシング",
-    "charge": "カード利用",
-    "interestCharge": "支払利息",
-    "refundCredit": "返金 / クレジット",
+    "balanceTransferCashAdvance": "キャッシング / 残高移行",
+    "charge": "ショッピング",
+    "interestCharge": "利息",
+    "refundCredit": "返金",
     "reimbursementRefund": "払い戻し / 返金"
   },
   "rules": {
+    "categoryOrPayee": "カテゴリまたは支払先",
+    "payeeRuleHint": "支払先ルールは一致するすべての取引に適用され、カテゴリは変更しません。",
     "editTitle": "ルールを編集",
     "addTitle": "ルールを追加",
     "editDescription": "名前のパターンで取引に自動でタグ付けします。複数一致した場合は優先度の高いルールが適用されます。",
@@ -161,6 +163,7 @@
     "amountChipBetween": "金額が{{value}}〜{{value2}}"
   },
   "transactions": {
+    "filterByPayee": "{{name}} の取引を表示",
     "deleteTitle_one": "取引を削除",
     "deleteTitle_other": "取引を削除",
     "deleteConfirmSingle": "この{{type}}({{amount}})を削除してもよろしいですか?",
@@ -573,6 +576,14 @@
     "subheading": "今月の計画・実績・個別設定。"
   },
   "insightsPage": {
+    "topPayees": "上位の支払先",
+    "labelFilter": {
+      "search": "支払先・イベントを検索",
+      "only": "のみ",
+      "without": "除外",
+      "payee": "支払先: {{name}}",
+      "eventType": "{{name}}のイベント"
+    },
     "uncategorized": "未分類",
     "heading": "支出インサイト",
     "loadError": "インサイトを読み込めませんでした。",
@@ -850,6 +861,13 @@
     "manage": "管理 →"
   },
   "cashForm": {
+    "payeeBulkSet": "支払先を設定",
+    "payeeSearch": "支払先を検索または追加",
+    "payeeEmpty": "支払先はまだありません。名前を入力して追加します。",
+    "payeeAdd": "「{{name}}」を追加",
+    "payeeClear": "支払先なし",
+    "payee": "支払先",
+    "payeePlaceholder": "取引の相手は?",
     "none": "なし",
     "addExpense": "支出を追加",
     "addIncome": "収入を追加",
@@ -890,7 +908,30 @@
     "notesPayee": "メモ / 支払先",
     "notesPlaceholder": "例: AMAZON*MARKETPLACE、STARBUCKS COFFEE",
     "updateTransaction": "取引を更新",
-    "createTransaction": "取引を作成"
+    "createTransaction": "取引を作成",
+    "typeChange": {
+      "transferOut": "振替出金として扱われます。相手の口座とリンクするまでは、レポートで支出として集計されます。",
+      "transferIn": "振替入金として扱われます。相手の口座とリンクするまでは、レポートで収入として集計されます。",
+      "cardPayment": "支払いとして扱われます。利用残高が減り、支出には含まれません。",
+      "cardAdvance": "キャッシングまたは残高移行として扱われます。利用残高が増えますが、支出には含まれません。",
+      "spending": "レポートで支出として扱われます。",
+      "refund": "返金として扱われ、支出が減ります。",
+      "income": "レポートで収入として扱われます。",
+      "none": "支出にも収入にも含まれなくなります。",
+      "reversesBalance": "残高も逆方向に動きます。",
+      "owesMore": "利用残高を増やす取引になります。",
+      "owesLess": "利用残高を減らす取引になります。"
+    },
+    "linkRow": {
+      "paidFrom": "支払元",
+      "receivedFrom": "入金元",
+      "sentTo": "送金先",
+      "untracked": "管理していない口座",
+      "suggested": "候補: {{account}} · {{date}} · {{amount}}",
+      "link": "リンク",
+      "hint": "相手の口座を選んで両方の取引をリンクするか、このままにしてください。",
+      "savesFirst": "口座を選ぶと、まずこの変更を保存してから両方の取引をリンクします。"
+    }
   },
   "txTab": {
     "duplicatedComment": "複製",

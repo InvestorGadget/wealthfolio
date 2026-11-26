@@ -26,6 +26,7 @@ use wealthfolio_core::activities::{
 use wealthfolio_core::assets::{contract_multiplier_from_asset_metadata, InstrumentType};
 use wealthfolio_core::limits::ContributionActivity;
 use wealthfolio_core::{Error, Result};
+use wealthfolio_spending::activity_assignments::is_category_taxonomy;
 
 use super::model::{
     ActivityDB, ActivityDetailsDB, CashLedgerActivityDB, ImportAccountTemplateDB, ImportTemplateDB,
@@ -385,7 +386,7 @@ fn project_activity_update(
     if was_transfer
         && matches!(
             effective_activity_type(&activity_to_update),
-            "DEPOSIT" | "WITHDRAWAL"
+            "DEPOSIT" | "WITHDRAWAL" | "CREDIT"
         )
     {
         activity_to_update.source_group_id = None;
@@ -411,7 +412,12 @@ fn split_effect(
         .load::<ActivityTaxonomyAssignmentDB>(conn)
         .map_err(StorageError::from)?;
     let invalidates = activity_update_invalidates_spending_splits(before, after);
-    let hidden = invalidates && !splits.is_empty() && !assignments.is_empty();
+    // Only a category can sit hidden behind the splits. A payee was never
+    // behind them, and stays as it is when they go.
+    let has_category = assignments
+        .iter()
+        .any(|assignment| is_category_taxonomy(&assignment.taxonomy_id));
+    let hidden = invalidates && !splits.is_empty() && has_category;
     let state = serde_json::to_vec(&(before, &splits, &assignments))
         .map_err(|_| ActivityError::InvalidData("Unable to review split effects".into()))?;
     Ok(ActivitySplitEffect {
@@ -546,6 +552,8 @@ fn preserve_source_classification(
                 | (ACTIVITY_TYPE_TRANSFER_OUT, "WITHDRAWAL")
                 | ("DEPOSIT", ACTIVITY_TYPE_TRANSFER_IN)
                 | (ACTIVITY_TYPE_TRANSFER_IN, "DEPOSIT")
+                | ("CREDIT", ACTIVITY_TYPE_TRANSFER_IN)
+                | (ACTIVITY_TYPE_TRANSFER_IN, "CREDIT")
         ) {
             activity.activity_type_override = None;
         }
@@ -5612,6 +5620,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn split_review_does_not_count_a_payee_as_a_retained_category() {
+        let (pool, writer, _dir) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        {
+            let mut conn = get_connection(&pool).expect("conn");
+            insert_account(&mut conn, "payee-account");
+            insert_activity_with_subtype(
+                &mut conn,
+                "payee-activity",
+                "payee-account",
+                "WITHDRAWAL",
+                None,
+                None,
+            );
+            insert_spending_split(&mut conn, "payee-split", "payee-activity");
+            diesel::sql_query("INSERT INTO taxonomy_categories (id,taxonomy_id,name,key,color,sort_order,created_at,updated_at) VALUES ('payee_bakery','payees','Corner Bakery','payee_bakery','#5B7C99',0,'2026-01-01','2026-01-01')").execute(&mut conn).expect("payee");
+            diesel::sql_query("INSERT INTO activity_taxonomy_assignments (id,activity_id,taxonomy_id,category_id,weight,source,created_at,updated_at) VALUES ('payee-row','payee-activity','payees','payee_bakery',10000,'manual','2026-01-01','2026-01-01')").execute(&mut conn).expect("payee assignment");
+        }
+        let update: ActivityUpdate = serde_json::from_value(serde_json::json!({"id":"payee-activity","accountId":"payee-account","activityType":"WITHDRAWAL","activityDate":"2024-01-15T00:00:00Z","currency":"USD","amount":"125"})).expect("update");
+
+        let effect = repo.preview_split_effect(&update).expect("pure preview");
+
+        assert_eq!(effect.removed_splits, 1);
+        assert!(!effect.has_retained_category_assignment);
+    }
+
+    #[tokio::test]
     async fn reviewed_financial_edits_disclose_splits_and_reject_stale_state_atomically() {
         let (pool, writer, _dir) = setup_db();
         let repo = ActivityRepository::new(pool.clone(), writer);
@@ -6966,6 +7001,193 @@ mod tests {
             .first(&mut conn)
             .expect("stored source group");
         assert_eq!(stored_group, None);
+    }
+
+    /// A card payment changed back to a refund/credit leaves its transfer
+    /// group behind, as a deposit does (#2740).
+    #[tokio::test]
+    async fn transfer_in_reclassified_as_credit_clears_source_group() {
+        let (pool, writer, _dir) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+
+        insert_account(&mut conn, "acc-a");
+        insert_transfer_activity(
+            &mut conn,
+            "orphan-in",
+            "acc-a",
+            "TRANSFER_IN",
+            Some("orphan-group"),
+            Some(r#"{"flow":{"is_external":true}}"#),
+        );
+
+        let updated = repo
+            .update_activity(ActivityUpdate {
+                unlink_transfer_pair_id: None,
+                split_review: None,
+                id: "orphan-in".to_string(),
+                account_id: "acc-a".to_string(),
+                asset: None,
+                activity_type: "CREDIT".to_string(),
+                subtype: None,
+                activity_date: "2024-01-15T00:00:00Z".to_string(),
+                quantity: None,
+                unit_price: None,
+                currency: "USD".to_string(),
+                fee: None,
+                tax: None,
+                amount: None,
+                status: None,
+                needs_review: None,
+                notes: None,
+                fx_rate: None,
+                metadata: None,
+            })
+            .await
+            .expect("transfer in becomes a credit");
+
+        assert_eq!(updated.activity_type, "CREDIT");
+        assert_eq!(updated.source_group_id, None);
+    }
+
+    #[tokio::test]
+    async fn card_credit_and_bank_withdrawal_convert_into_a_linked_payment() {
+        let (pool, writer, _dir) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+
+        insert_account(&mut conn, "card");
+        insert_account(&mut conn, "bank");
+        insert_transfer_activity(&mut conn, "card-credit", "card", "CREDIT", None, None);
+        insert_transfer_activity(&mut conn, "bank-out", "bank", "WITHDRAWAL", None, None);
+        let internal = Some(r#"{"flow":{"is_external":false}}"#.to_string());
+        let retype = |id: &str, account_id: &str, activity_type: &str| ActivityUpdate {
+            unlink_transfer_pair_id: None,
+            split_review: None,
+            id: id.to_string(),
+            account_id: account_id.to_string(),
+            asset: None,
+            activity_type: activity_type.to_string(),
+            subtype: Some(String::new()),
+            activity_date: "2024-01-15T00:00:00Z".to_string(),
+            quantity: None,
+            unit_price: None,
+            currency: "USD".to_string(),
+            fee: None,
+            tax: None,
+            amount: None,
+            status: None,
+            needs_review: None,
+            notes: None,
+            fx_rate: None,
+            metadata: internal.clone(),
+        };
+
+        let (transfer_in, transfer_out) = repo
+            .mutate_and_link_transfer(
+                Vec::new(),
+                vec![
+                    retype("card-credit", "card", ACTIVITY_TYPE_TRANSFER_IN),
+                    retype("bank-out", "bank", ACTIVITY_TYPE_TRANSFER_OUT),
+                ],
+                "card-credit".to_string(),
+                Some("bank-out".to_string()),
+            )
+            .await
+            .expect("a card credit pairs as the card's payment");
+
+        assert_eq!(transfer_in.id, "card-credit");
+        assert_eq!(transfer_in.effective_type(), ACTIVITY_TYPE_TRANSFER_IN);
+        assert_eq!(transfer_out.id, "bank-out");
+        assert_eq!(transfer_out.effective_type(), ACTIVITY_TYPE_TRANSFER_OUT);
+        assert!(transfer_in.source_group_id.is_some());
+        assert_eq!(transfer_in.source_group_id, transfer_out.source_group_id);
+    }
+
+    /// #2740: a synced card credit the user changed to the card's payment stays
+    /// a payment when the provider sends the same record again as a credit.
+    #[tokio::test]
+    async fn resync_keeps_a_synced_card_credit_the_user_made_a_payment() {
+        let (pool, writer, _dir) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account(&mut conn, "card");
+        drop(conn);
+
+        let synced = |id: &str, notes: &str| ActivityUpsert {
+            id: id.into(),
+            account_id: "card".into(),
+            asset_id: None,
+            activity_type: "CREDIT".into(),
+            subtype: None,
+            activity_date: "2026-01-15T00:00:00Z".into(),
+            quantity: None,
+            unit_price: None,
+            currency: "USD".into(),
+            fee: None,
+            tax: None,
+            amount: Some(Decimal::new(45000, 2)),
+            status: None,
+            notes: Some(notes.into()),
+            fx_rate: None,
+            metadata: None,
+            needs_review: None,
+            source_system: Some("SIMPLEFIN".into()),
+            source_record_id: Some("card-txn-1".into()),
+            source_group_id: None,
+            idempotency_key: Some(format!("key-{id}")),
+            import_run_id: None,
+        };
+        assert_eq!(
+            repo.bulk_upsert(vec![synced("card-credit", "PAYMENT - THANK YOU")])
+                .await
+                .expect("first sync")
+                .created,
+            1
+        );
+
+        repo.update_activity(ActivityUpdate {
+            unlink_transfer_pair_id: None,
+            split_review: None,
+            id: "card-credit".to_string(),
+            account_id: "card".to_string(),
+            asset: None,
+            activity_type: ACTIVITY_TYPE_TRANSFER_IN.to_string(),
+            subtype: Some(String::new()),
+            activity_date: "2026-01-15T00:00:00Z".to_string(),
+            quantity: None,
+            unit_price: None,
+            currency: "USD".to_string(),
+            fee: None,
+            tax: None,
+            amount: None,
+            status: None,
+            needs_review: None,
+            notes: Some("PAYMENT - THANK YOU".to_string()),
+            fx_rate: None,
+            metadata: Some(r#"{"flow":{"is_external":true}}"#.to_string()),
+        })
+        .await
+        .expect("user changes the credit to a payment");
+
+        // The provider re-sends the record under the same id, then under a new
+        // id and key (matched by its source identity).
+        for refresh in [
+            synced("card-credit", "Provider refresh"),
+            synced("card-credit-reissued", "Provider refresh"),
+        ] {
+            let result = repo.bulk_upsert(vec![refresh]).await.expect("re-sync");
+            assert_eq!(result.skipped, 1, "{result:?}");
+            assert_eq!(result.created, 0, "{result:?}");
+        }
+
+        let activities = repo.get_activities().expect("activities");
+        assert_eq!(activities.len(), 1);
+        let payment = &activities[0];
+        assert_eq!(payment.id, "card-credit");
+        assert_eq!(payment.effective_type(), ACTIVITY_TYPE_TRANSFER_IN);
+        assert_eq!(payment.notes.as_deref(), Some("PAYMENT - THANK YOU"));
+        assert!(payment.is_user_modified);
     }
 
     #[tokio::test]
