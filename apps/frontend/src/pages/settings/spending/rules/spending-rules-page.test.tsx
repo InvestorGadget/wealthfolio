@@ -42,6 +42,8 @@ const values: RuleFormValues = {
   amountValue2: "",
   priority: 0,
   accountId: null,
+  payeeConditionId: "payee-1",
+  setPayeeId: null,
 };
 // The modal's form, reduced to its save.
 vi.mock("@/features/spending/components/rule-edit-modal", () => ({
@@ -75,6 +77,12 @@ it("closes the new rule once its save ends while the screen is out of sight", as
   fireEvent.click(screen.getAllByRole("button", { name: "Add rule" })[0]);
   fireEvent.click(screen.getByRole("button", { name: "Save rule" }));
   await waitFor(() => expect(saveStatus()).toBe("pending"));
+  // The payee fields go with the rest of the rule, null included.
+  expect((mocks.create.mock.calls[0] as unknown[])[0]).toMatchObject({
+    pattern: "STARBUCKS",
+    payeeConditionId: "payee-1",
+    setPayeeId: null,
+  });
 
   rerender(page(true));
   act(() => finish());

@@ -534,6 +534,33 @@ mod tests {
         );
     }
 
+    /// The rule form stores a "matches any of" list as a regex (see
+    /// `apps/frontend/src/features/spending/lib/rule-conditions.ts`). These
+    /// are the strings its tests expect it to produce: they must compile
+    /// here, and match as the list reads.
+    #[test]
+    fn a_list_the_rule_form_compiles_matches_as_the_list_reads() {
+        let any_of = |pattern: &str| vec![rule("list", pattern, RuleMatchType::Regex, 0)];
+
+        let contains = any_of(r"(?i)(?:AT\&T|Disney\+|A\|B|C\.O\.D\. \(x\))");
+        for notes in ["pos at&t wireless", "DISNEY+ 123", "a|b", "c.o.d. (x)"] {
+            assert!(matched(&contains, notes, None).is_some(), "{notes}");
+        }
+        for notes in ["disneyy", "ATT", "ab", "cxoxdx (x)"] {
+            assert!(matched(&contains, notes, None).is_none(), "{notes}");
+        }
+
+        let exact = any_of(r"(?i)^(?:NETFLIX|SPOTIFY)$");
+        assert!(matched(&exact, "netflix", None).is_some());
+        assert!(matched(&exact, "Spotify", None).is_some());
+        assert!(matched(&exact, "NETFLIX.COM", None).is_none());
+        assert!(matched(&exact, "MY NETFLIX", None).is_none());
+
+        // Every character the form escapes is a valid escape here.
+        let every_meta = any_of(r"(?i)(?:\\\.\+\*\?\(\)\|\[\]\{\}\^\$\#\&\-\~)");
+        assert!(matched(&every_meta, r"x \.+*?()|[]{}^$#&-~ y", None).is_some());
+    }
+
     fn payee_assignment(
         payee: &str,
         source: &str,

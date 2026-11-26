@@ -25,7 +25,10 @@ export function payeeIdOf(
 }
 
 /** The payee with this name, ignoring case and surrounding spaces. */
-export function findPayee(payees: TaxonomyCategory[], name: string): TaxonomyCategory | undefined {
+export function findPayee<P extends Pick<TaxonomyCategory, "name">>(
+  payees: P[],
+  name: string,
+): P | undefined {
   const wanted = name.trim().toLowerCase();
   if (!wanted) return undefined;
   return payees.find((payee) => payee.name.trim().toLowerCase() === wanted);

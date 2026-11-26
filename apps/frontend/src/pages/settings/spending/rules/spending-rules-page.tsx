@@ -51,6 +51,7 @@ import {
 } from "@/features/spending/components/rule-form";
 import { isSpendingAccountType } from "@/features/spending/lib/constants";
 import { PAYEES_TAXONOMY_ID } from "@/features/spending/lib/payee";
+import { hasTextCondition, parseAnyOfPattern } from "@/features/spending/lib/rule-conditions";
 import {
   useCategorizationRuleMutations,
   useCategorizationRules,
@@ -215,6 +216,9 @@ export default function SpendingRulesPage() {
             amountOp,
             amountValue,
             amountValue2,
+            // Always sent explicitly too: null clears the payee.
+            payeeConditionId: values.payeeConditionId,
+            setPayeeId: values.setPayeeId,
             priority: values.priority,
             // Always sent explicitly: null clears the column, an id sets it, and
             // the backend rejects an isGlobal/accountId pair that disagrees.
@@ -233,6 +237,8 @@ export default function SpendingRulesPage() {
           amountOp,
           amountValue,
           amountValue2,
+          payeeConditionId: values.payeeConditionId,
+          setPayeeId: values.setPayeeId,
           priority: values.priority,
           isGlobal: values.accountId === null,
           accountId: values.accountId,
@@ -256,10 +262,19 @@ export default function SpendingRulesPage() {
           return false;
         if (!query) return true;
         const name = rule.name?.toLowerCase() ?? "";
-        const pattern = rule.pattern?.toLowerCase() ?? "";
-        return name.includes(query) || pattern.includes(query);
+        // The text as the rule shows it: nothing for a payee-only rule, and
+        // the texts of a list in place of the regex they are stored as.
+        const pattern = hasTextCondition(rule) ? rule.pattern.toLowerCase() : "";
+        const listed =
+          rule.matchType === "regex" ? (parseAnyOfPattern(rule.pattern)?.items ?? []) : [];
+        const payees = [rule.payeeConditionId, rule.setPayeeId].map((payeeId) =>
+          payeeId ? (categoryMeta[`${PAYEES_TAXONOMY_ID}:${payeeId}`]?.name ?? "") : "",
+        );
+        return [name, pattern, ...listed, ...payees].some((text) =>
+          text.toLowerCase().includes(query),
+        );
       });
-  }, [rules, searchQuery, presetFilter]);
+  }, [rules, searchQuery, presetFilter, categoryMeta]);
 
   const customRulesCount = useMemo(() => rules.filter((r) => !r.presetId).length, [rules]);
   const totalRulesCount = rules.length;

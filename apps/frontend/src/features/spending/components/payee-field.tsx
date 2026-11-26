@@ -83,9 +83,11 @@ export function PayeeField({ value, onChange, payees, isMobile }: PayeeFieldProp
 interface PayeeCommandProps {
   /** The current payee's name, or "" for none: it gets the check mark, and the "No payee" row. */
   value: string;
-  payees: TaxonomyCategory[];
+  payees: Pick<TaxonomyCategory, "id" | "name">[];
   /** Called with a payee's name, a new name to add, or "" to clear. */
   onPick: (name: string) => void;
+  /** Without it only existing payees can be picked: no `Add "<name>"` row. */
+  allowAdd?: boolean;
   /**
    * Offers "No payee" even with no current payee: for a selection of several
    * transactions, some of which may have one.
@@ -97,7 +99,13 @@ interface PayeeCommandProps {
  * The searchable payee list, for any popover: existing payees by name, an
  * `Add "<name>"` row for a name no payee has yet, and "No payee" when one is set.
  */
-export function PayeeCommand({ value, payees, onPick, clearable = false }: PayeeCommandProps) {
+export function PayeeCommand({
+  value,
+  payees,
+  onPick,
+  clearable = false,
+  allowAdd = true,
+}: PayeeCommandProps) {
   const canClear = value !== "" || clearable;
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
@@ -107,7 +115,7 @@ export function PayeeCommand({ value, payees, onPick, clearable = false }: Payee
     [payees],
   );
   const typed = search.trim();
-  const canAdd = typed !== "" && !findPayee(payees, typed);
+  const canAdd = allowAdd && typed !== "" && !findPayee(payees, typed);
 
   const pick = (name: string) => {
     onPick(name);

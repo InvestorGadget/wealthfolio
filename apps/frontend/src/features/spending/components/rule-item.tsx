@@ -19,6 +19,8 @@ import {
   useNumberFormatting,
 } from "@wealthfolio/ui";
 
+import { PAYEES_TAXONOMY_ID } from "../lib/payee";
+import { hasTextCondition, parseAnyOfPattern } from "../lib/rule-conditions";
 import type { CategorizationRule } from "../types/rule";
 
 export interface RuleCategoryMeta {
@@ -122,7 +124,26 @@ export function RuleItem({
             { value: formatAmount(rule.amountValue) },
           )
       : null;
-  const matchLabel = MATCH_TYPE_LABELS[rule.matchType] ?? rule.matchType;
+  // The text condition as the form shows it: none for a rule that matches on
+  // a payee alone (its stored placeholder is never shown), and the list of a
+  // "matches any of" rule in place of the regex it is stored as.
+  const textCondition = hasTextCondition(rule);
+  const anyOf =
+    textCondition && rule.matchType === "regex" ? parseAnyOfPattern(rule.pattern) : null;
+  const patternText = anyOf ? anyOf.items.join(" · ") : rule.pattern;
+  const matchLabel = !textCondition
+    ? null
+    : anyOf
+      ? anyOf.mode === "exact"
+        ? t("spending:rules.matchAnyExact")
+        : t("spending:rules.matchAnyContains")
+      : (MATCH_TYPE_LABELS[rule.matchType] ?? rule.matchType);
+  const payeeName = (payeeId?: string | null) =>
+    payeeId
+      ? (categoryMeta[`${PAYEES_TAXONOMY_ID}:${payeeId}`]?.name ?? t("spending:rules.unknownPayee"))
+      : null;
+  const payeeConditionName = payeeName(rule.payeeConditionId);
+  const setPayeeName = payeeName(rule.setPayeeId);
   const preset = rule.presetId ? (presetMeta?.[rule.presetId] ?? null) : null;
   const presetBadgeTitle = preset
     ? rule.presetModified
@@ -176,45 +197,72 @@ export function RuleItem({
             <span className="text-muted-foreground text-2xs shrink-0">
               {matchLabel}
               {rule.priority > 0 && (
-                <> · {t("spending:rules.priority", { value: rule.priority })}</>
+                <>
+                  {matchLabel ? " · " : ""}
+                  {t("spending:rules.priority", { value: rule.priority })}
+                </>
               )}
             </span>
           </div>
 
           {/* Line 2: pattern (truncated by default; click to expand) */}
-          <button
-            type="button"
-            onClick={() => setPatternExpanded((v) => !v)}
-            className="text-muted-foreground/80 hover:text-muted-foreground block w-full text-start transition-colors"
-            aria-label={
-              patternExpanded
-                ? t("spending:rules.collapsePattern")
-                : t("spending:rules.expandPattern")
-            }
-            title={rule.pattern}
-          >
-            <code
-              className={
+          {textCondition && (
+            <button
+              type="button"
+              onClick={() => setPatternExpanded((v) => !v)}
+              className="text-muted-foreground/80 hover:text-muted-foreground block w-full text-start transition-colors"
+              aria-label={
                 patternExpanded
-                  ? "text-2xs block font-mono break-all whitespace-pre-wrap"
-                  : "text-2xs block truncate font-mono"
+                  ? t("spending:rules.collapsePattern")
+                  : t("spending:rules.expandPattern")
               }
+              title={patternText}
             >
-              {rule.pattern}
-            </code>
-          </button>
+              <code
+                className={
+                  patternExpanded
+                    ? "text-2xs block font-mono break-all whitespace-pre-wrap"
+                    : "text-2xs block truncate font-mono"
+                }
+              >
+                {patternText}
+              </code>
+            </button>
+          )}
 
-          {/* Line 3: amount condition, spelled out in words */}
-          {amountLabel && (
-            <span className="border-border text-muted-foreground text-2xs inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5">
-              <Icons.Coins className="h-3 w-3 shrink-0" aria-hidden="true" />
-              {amountLabel}
-            </span>
+          {/* Line 3: the other conditions, spelled out in words */}
+          {(payeeConditionName || amountLabel) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {payeeConditionName && (
+                <span className="border-border text-muted-foreground text-2xs inline-flex max-w-full items-center gap-1.5 rounded-full border px-2 py-0.5">
+                  <Icons.User className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  <span className="truncate">
+                    {t("spending:rules.payeeConditionChip", { name: payeeConditionName })}
+                  </span>
+                </span>
+              )}
+              {amountLabel && (
+                <span className="border-border text-muted-foreground text-2xs inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5">
+                  <Icons.Coins className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  {amountLabel}
+                </span>
+              )}
+            </div>
           )}
         </div>
 
         {/* Right: target chip + actions */}
         <div className="flex shrink-0 items-center gap-2 pt-0.5">
+          {setPayeeName && (
+            <span
+              className="bg-muted/60 text-muted-foreground inline-flex max-w-40 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs"
+              title={t("spending:rules.setPayeeChip", { name: setPayeeName })}
+              aria-label={t("spending:rules.setPayeeChip", { name: setPayeeName })}
+            >
+              <Icons.User className="h-3 w-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">{setPayeeName}</span>
+            </span>
+          )}
           {target && targetLabel ? (
             <span
               className="bg-muted/60 inline-flex max-w-50 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs"

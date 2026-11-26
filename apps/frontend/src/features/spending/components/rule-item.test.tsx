@@ -129,3 +129,56 @@ it("uses the formatting region for rule amounts while the language stays English
   );
   expect(screen.getByText("Amount exactly 12.345,67")).toBeInTheDocument();
 });
+
+describe("RuleItem payee and list display", () => {
+  const payees = {
+    "payees:p1": { name: "Corner Bakery", color: null, parentName: null },
+  };
+  const renderWithPayees = (r: CategorizationRule) =>
+    render(<RuleItem rule={r} categoryMeta={payees} onEdit={vi.fn()} onDelete={vi.fn()} />);
+
+  it("names the payee a rule matches on and hides the placeholder pattern", () => {
+    renderWithPayees(rule({ pattern: "(?!)", matchType: "regex", payeeConditionId: "p1" }));
+
+    expect(screen.getByText("Payee is Corner Bakery")).toBeInTheDocument();
+    expect(screen.queryByText("(?!)")).not.toBeInTheDocument();
+    // No text condition, so no match type either.
+    expect(screen.queryByText("regex")).not.toBeInTheDocument();
+  });
+
+  it("shows the text condition beside the payee when the rule has both", () => {
+    renderWithPayees(rule({ payeeConditionId: "p1" }));
+
+    expect(screen.getByText("STARBUCKS")).toBeInTheDocument();
+    expect(screen.getByText("Payee is Corner Bakery")).toBeInTheDocument();
+  });
+
+  it("names the payee a rule also sets", () => {
+    renderWithPayees(rule({ setPayeeId: "p1" }));
+
+    expect(screen.getByLabelText("Also sets the payee Corner Bakery")).toHaveTextContent(
+      "Corner Bakery",
+    );
+  });
+
+  it("says so when the payee is gone", () => {
+    renderWithPayees(rule({ payeeConditionId: "deleted" }));
+
+    expect(screen.getByText("Payee is Unknown payee")).toBeInTheDocument();
+  });
+
+  it("shows a compiled list as its texts, not as the regex it is stored as", () => {
+    renderWithPayees(rule({ pattern: "(?i)^(?:AT\\&T|Disney\\+)$", matchType: "regex" }));
+
+    expect(screen.getByText("AT&T · Disney+")).toBeInTheDocument();
+    expect(screen.getByText("exactly any of")).toBeInTheDocument();
+    expect(screen.queryByText("regex")).not.toBeInTheDocument();
+  });
+
+  it("leaves a hand-written regex as it is", () => {
+    renderWithPayees(rule({ pattern: "^AMZN.*", matchType: "regex" }));
+
+    expect(screen.getByText("^AMZN.*")).toBeInTheDocument();
+    expect(screen.getByText("regex")).toBeInTheDocument();
+  });
+});

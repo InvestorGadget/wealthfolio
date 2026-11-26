@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMemo } from "react";
+import { useId, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import * as z from "zod";
@@ -15,21 +15,35 @@ import {
   FormMessage,
   Icons,
   Input,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
   Spinner,
+  Textarea,
 } from "@wealthfolio/ui";
 
-import { PAYEES_TAXONOMY_ID } from "../lib/payee";
+import { findPayee, PAYEES_TAXONOMY_ID } from "../lib/payee";
+import {
+  isAnyOfMode,
+  MAX_REGEX_PATTERN_LENGTH,
+  storedTextCondition,
+  textConditionDraft,
+  type TextConditionMode,
+} from "../lib/rule-conditions";
 import type { CategorizationRule, RuleAmountOp, RuleMatchType } from "../types/rule";
 import { CategoryIconTile } from "./category-chips";
+import { PayeeCommand } from "./payee-field";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
 
+/** What the form hands back: the rule as it is saved. */
 export interface RuleFormValues {
   name: string;
+  /** The stored text condition. Empty when the rule matches on a payee alone. */
   pattern: string;
   matchType: RuleMatchType;
   taxonomyId?: string;
@@ -43,7 +57,27 @@ export interface RuleFormValues {
   priority: number;
   /** null applies the rule to every account; a value scopes it to that account. */
   accountId: string | null;
+  /** The payee the rule matches on, or null for any. */
+  payeeConditionId: string | null;
+  /** The payee a category rule also sets, or null for none. */
+  setPayeeId: string | null;
 }
+
+/**
+ * The form's own state. The text condition is kept as it is edited: a match
+ * type that can also be one of the two list modes, and the list's texts, one
+ * per line. It is compiled to `pattern` and `matchType` when the form is
+ * submitted (see `storedTextCondition`).
+ */
+export interface RuleFormState extends Omit<RuleFormValues, "matchType"> {
+  matchType: TextConditionMode;
+  patternList: string;
+}
+
+const utf8Length = (text: string): number => new TextEncoder().encode(text).length;
+
+/** Whether the composite `<taxonomyId>:<categoryId>` target is a payee. */
+const targetsPayee = (target?: string): boolean => !!target?.startsWith(`${PAYEES_TAXONOMY_ID}:`);
 
 const parseAmount = (raw: string): number | null => {
   const trimmed = raw.trim();
@@ -75,8 +109,9 @@ export const buildRuleFormSchema = (t: Translate) =>
   z
     .object({
       name: z.string().min(1, t("spending:rules.nameRequired")),
-      pattern: z.string().min(1, t("spending:rules.patternRequired")),
-      matchType: z.enum(["contains", "starts_with", "exact", "regex"]),
+      pattern: z.string(),
+      patternList: z.string(),
+      matchType: z.enum(["contains", "starts_with", "exact", "regex", "any_contains", "any_exact"]),
       taxonomyId: z.string().optional(),
       categoryId: z.string().optional(),
       activityType: z.string().optional(),
@@ -88,10 +123,44 @@ export const buildRuleFormSchema = (t: Translate) =>
         .int(t("spending:rules.priorityInvalid"))
         .min(0, t("spending:rules.priorityInvalid")),
       accountId: z.string().nullable(),
+      payeeConditionId: z.string().nullable(),
+      setPayeeId: z.string().nullable(),
     })
     .refine((data) => data.categoryId || data.activityType, {
       message: t("spending:rules.categoryOrTypeRequired"),
       path: ["categoryId"],
+    })
+    .superRefine((data, ctx) => {
+      // A rule matches on a text, on a payee, or on both: never on neither.
+      const listMode = isAnyOfMode(data.matchType);
+      const textPath = [listMode ? "patternList" : "pattern"];
+      const stored = storedTextCondition({
+        mode: data.matchType,
+        pattern: data.pattern,
+        list: data.patternList,
+      });
+      if (!stored.pattern && !data.payeeConditionId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t("spending:rules.conditionRequired"),
+          path: textPath,
+        });
+      } else if (listMode && utf8Length(stored.pattern) > MAX_REGEX_PATTERN_LENGTH) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t("spending:rules.patternListTooLong"),
+          path: textPath,
+        });
+      }
+      // A rule that matches on a payee runs after the payees are set, so it
+      // cannot set one itself.
+      if (data.payeeConditionId && targetsPayee(data.categoryId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: t("spending:rules.payeeConditionWithPayeeTarget"),
+          path: ["categoryId"],
+        });
+      }
     })
     .superRefine((data, ctx) => {
       if (!data.amountOp) return;
@@ -167,6 +236,61 @@ const composite = (rule?: CategorizationRule): string => {
   return "";
 };
 
+interface RulePayeeOption {
+  id: string;
+  name: string;
+}
+
+interface RulePayeePickerProps {
+  /** The picked payee's id, or null for none. */
+  value: string | null;
+  onChange: (payeeId: string | null) => void;
+  payees: RulePayeeOption[];
+  placeholder: string;
+  labelId: string;
+}
+
+/** Picks one existing payee, by the searchable list the transaction form uses. */
+function RulePayeePicker({ value, onChange, payees, placeholder, labelId }: RulePayeePickerProps) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  // A rule can name a payee that has since been deleted on another device.
+  // It keeps its place so the id survives a save untouched.
+  const name = value
+    ? (payees.find((payee) => payee.id === value)?.name ?? t("spending:rules.unknownPayee"))
+    : "";
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button
+            type="button"
+            variant="field"
+            aria-labelledby={labelId}
+            className="w-full justify-between"
+          />
+        }
+      >
+        <span className={name ? "min-w-0 truncate" : "text-muted-foreground min-w-0 truncate"}>
+          {name || placeholder}
+        </span>
+        <Icons.ChevronDown className="ms-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
+      </PopoverTrigger>
+      <PopoverContent className="w-70 p-0" align="start">
+        <PayeeCommand
+          value={name}
+          payees={payees}
+          allowAdd={false}
+          onPick={(picked) => {
+            onChange(picked ? (findPayee(payees, picked)?.id ?? null) : null);
+            setOpen(false);
+          }}
+        />
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function RuleForm({
   rule,
   categoryOptions,
@@ -206,22 +330,41 @@ export function RuleForm({
     [t],
   );
 
-  const MATCH_TYPE_OPTIONS = useMemo<{ value: RuleMatchType; label: string }[]>(
+  const MATCH_TYPE_OPTIONS = useMemo<{ value: TextConditionMode; label: string }[]>(
     () => [
       { value: "contains", label: t("spending:rules.matchContainsLabel") },
       { value: "starts_with", label: t("spending:rules.matchStartsWithLabel") },
       { value: "exact", label: t("spending:rules.matchExactLabel") },
+      { value: "any_contains", label: t("spending:rules.matchAnyContainsLabel") },
+      { value: "any_exact", label: t("spending:rules.matchAnyExactLabel") },
       { value: "regex", label: t("spending:rules.matchRegexLabel") },
     ],
     [t],
   );
 
-  const form = useForm<RuleFormValues>({
+  const payeeOptions = useMemo<RulePayeeOption[]>(
+    () =>
+      categoryOptions
+        .filter((option) => option.taxonomyId === PAYEES_TAXONOMY_ID)
+        .map((option) => ({ id: option.categoryId, name: option.label })),
+    [categoryOptions],
+  );
+  const payeeConditionLabelId = useId();
+  const setPayeeLabelId = useId();
+
+  // The stored text condition as the form edits it: a payee-only rule shows
+  // an empty text, never its placeholder, and a compiled list shows the list.
+  const initialText = useMemo(() => textConditionDraft(rule), [rule]);
+
+  const form = useForm<RuleFormState>({
     resolver: zodResolver(ruleFormSchema) as never,
     defaultValues: {
       name: rule?.name ?? "",
-      pattern: rule?.pattern ?? "",
-      matchType: rule?.matchType ?? "contains",
+      pattern: initialText.pattern,
+      patternList: initialText.list,
+      matchType: initialText.mode,
+      payeeConditionId: rule?.payeeConditionId ?? null,
+      setPayeeId: rule?.setPayeeId ?? null,
       taxonomyId: rule?.taxonomyId ?? "",
       categoryId: composite(rule), // we encode taxonomyId:categoryId in this single field
       activityType: rule?.activityType ?? "",
@@ -234,6 +377,12 @@ export function RuleForm({
   });
 
   const amountOp = form.watch("amountOp");
+  const matchMode = form.watch("matchType");
+  const payeeConditionId = form.watch("payeeConditionId");
+  const target = form.watch("categoryId");
+  // Only a rule that sets a category can also set a payee, and not one that
+  // matches on a payee.
+  const canAlsoSetPayee = !!target && !targetsPayee(target) && !payeeConditionId;
 
   // A rule can reference an account that is no longer tracked (or is archived and
   // so absent from accountOptions). Keep it in the list so the trigger isn't blank
@@ -246,7 +395,7 @@ export function RuleForm({
     return [...accountOptions, { id: scopedId, name: t("spending:rules.unknownAccount") }];
   }, [accountOptions, rule, t]);
 
-  const handleSubmit = (values: RuleFormValues) => {
+  const handleSubmit = ({ patternList, ...values }: RuleFormState) => {
     // Decode composite categoryId back into taxonomyId + categoryId
     let taxonomyId = "";
     let categoryId = "";
@@ -255,10 +404,19 @@ export function RuleForm({
       taxonomyId = tax;
       categoryId = cat;
     }
+    const alsoSetsPayee =
+      !!categoryId && taxonomyId !== PAYEES_TAXONOMY_ID && !values.payeeConditionId;
     onSubmit({
       ...values,
+      ...storedTextCondition({
+        mode: values.matchType,
+        pattern: values.pattern,
+        list: patternList,
+      }),
       taxonomyId,
       categoryId,
+      // Dropped with the field when the rule can no longer set one.
+      setPayeeId: alsoSetsPayee ? values.setPayeeId : null,
     });
   };
 
@@ -308,25 +466,76 @@ export function RuleForm({
           )}
         />
 
+        {isAnyOfMode(matchMode) ? (
+          <FormField
+            control={form.control as never}
+            name="patternList"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t("spending:rules.patternList")}</FormLabel>
+                <FormControl>
+                  <Textarea
+                    rows={4}
+                    placeholder={t("spending:rules.patternListPlaceholder")}
+                    {...field}
+                  />
+                </FormControl>
+                <FormDescription>
+                  {matchMode === "any_exact"
+                    ? t("spending:rules.patternListExactHint")
+                    : t("spending:rules.patternListContainsHint")}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        ) : (
+          <FormField
+            control={form.control as never}
+            name="pattern"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>{t("spending:rules.pattern")}</FormLabel>
+                <FormControl>
+                  <Input
+                    placeholder={
+                      matchMode === "regex"
+                        ? t("spending:rules.patternPlaceholderRegex")
+                        : t("spending:rules.patternPlaceholder")
+                    }
+                    {...field}
+                  />
+                </FormControl>
+                {matchMode === "regex" && (
+                  <FormDescription>{t("spending:rules.patternRegexHint")}</FormDescription>
+                )}
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
+
         <FormField
           control={form.control as never}
-          name="pattern"
+          name="payeeConditionId"
           render={({ field }) => (
             <FormItem>
-              <FormLabel>{t("spending:rules.pattern")}</FormLabel>
-              <FormControl>
-                <Input
-                  placeholder={
-                    form.watch("matchType") === "regex"
-                      ? t("spending:rules.patternPlaceholderRegex")
-                      : t("spending:rules.patternPlaceholder")
-                  }
-                  {...field}
-                />
-              </FormControl>
-              {form.watch("matchType") === "regex" && (
-                <FormDescription>{t("spending:rules.patternRegexHint")}</FormDescription>
-              )}
+              <div className="flex items-baseline gap-1.5">
+                <FormLabel id={payeeConditionLabelId}>
+                  {t("spending:rules.payeeCondition")}
+                </FormLabel>
+                <span className="text-muted-foreground text-xs">
+                  {t("spending:rules.amountOptional")}
+                </span>
+              </div>
+              <RulePayeePicker
+                value={(field.value as string | null) ?? null}
+                onChange={field.onChange}
+                payees={payeeOptions}
+                placeholder={t("spending:rules.payeeConditionAny")}
+                labelId={payeeConditionLabelId}
+              />
+              <FormDescription>{t("spending:rules.payeeConditionHint")}</FormDescription>
               <FormMessage />
             </FormItem>
           )}
@@ -377,7 +586,7 @@ export function RuleForm({
               const currentOption = currentCatId
                 ? categoryOptions.find((opt) => opt.categoryId === currentCatId)
                 : undefined;
-              const targetsPayee = fieldValue.startsWith(`${PAYEES_TAXONOMY_ID}:`);
+              const payeeTarget = targetsPayee(fieldValue);
               return (
                 <FormItem>
                   <FormLabel>{t("spending:rules.categoryOrPayee")}</FormLabel>
@@ -427,7 +636,7 @@ export function RuleForm({
                     }
                   />
                   <FormDescription>
-                    {targetsPayee
+                    {payeeTarget
                       ? t("spending:rules.payeeRuleHint")
                       : t("spending:rules.categoryCompatibilityHint")}
                   </FormDescription>
@@ -437,6 +646,32 @@ export function RuleForm({
             }}
           />
         </div>
+
+        {canAlsoSetPayee && (
+          <FormField
+            control={form.control as never}
+            name="setPayeeId"
+            render={({ field }) => (
+              <FormItem>
+                <div className="flex items-baseline gap-1.5">
+                  <FormLabel id={setPayeeLabelId}>{t("spending:rules.setPayee")}</FormLabel>
+                  <span className="text-muted-foreground text-xs">
+                    {t("spending:rules.amountOptional")}
+                  </span>
+                </div>
+                <RulePayeePicker
+                  value={(field.value as string | null) ?? null}
+                  onChange={field.onChange}
+                  payees={payeeOptions}
+                  placeholder={t("spending:rules.setPayeeNone")}
+                  labelId={setPayeeLabelId}
+                />
+                <FormDescription>{t("spending:rules.setPayeeHint")}</FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        )}
 
         <div className="space-y-2">
           <div className="flex items-baseline gap-1.5">
