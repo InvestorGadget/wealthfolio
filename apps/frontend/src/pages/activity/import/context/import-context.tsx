@@ -110,6 +110,8 @@ export interface DraftActivity {
   tax?: string | null;
   accountId: string;
   comment?: string;
+  /** The bank's own description of the row, when a column holds it. */
+  importedDescription?: string;
   subtype?: string;
   fxRate?: string | null;
   /** Whether a transfer or credit crosses the tracked-account boundary. */

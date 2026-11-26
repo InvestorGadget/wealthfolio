@@ -1323,3 +1323,34 @@ describe("createDraftActivities ISIN fallback for a name in Symbol", () => {
     expect(invalid.symbolName).toBeUndefined();
   });
 });
+
+describe("imported description", () => {
+  it("carries a mapped bank description to the import row beside the comment", () => {
+    const withDescription = [...headers, ImportFormat.COMMENT, ImportFormat.IMPORTED_DESCRIPTION];
+    const mapping = {
+      ...baseMapping,
+      fieldMappings: {
+        ...baseMapping.fieldMappings,
+        [ImportFormat.COMMENT]: ImportFormat.COMMENT,
+        [ImportFormat.IMPORTED_DESCRIPTION]: ImportFormat.IMPORTED_DESCRIPTION,
+      },
+    };
+    const [edited, blank] = createDraftActivities(
+      [
+        ["2026-04-02", "WITHDRAWAL", "30", "USD", "Weekly shop", " TESCO STORES 3301 "],
+        ["2026-04-03", "WITHDRAWAL", "12", "USD", "Fuel", "  "],
+      ],
+      withDescription,
+      mapping,
+      parseConfig,
+      "account-1",
+    );
+
+    expect(draftToActivityImport(edited)).toMatchObject({
+      comment: "Weekly shop",
+      importedDescription: "TESCO STORES 3301",
+    });
+    // Left out, the host stores the comment as the imported description.
+    expect(draftToActivityImport(blank).importedDescription).toBeUndefined();
+  });
+});

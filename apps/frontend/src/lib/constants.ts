@@ -244,6 +244,8 @@ export const ImportFormat = {
   FEE: "fee",
   TAX: "tax",
   COMMENT: "comment",
+  /** The bank's own description, kept apart from the user's comment. */
+  IMPORTED_DESCRIPTION: "importedDescription",
   FX_RATE: "fxRate",
   SUBTYPE: "subtype",
   INSTRUMENT_TYPE: "instrumentType",
@@ -264,6 +266,7 @@ export const importFormatSchema = z.enum([
   ImportFormat.FEE,
   ImportFormat.TAX,
   ImportFormat.COMMENT,
+  ImportFormat.IMPORTED_DESCRIPTION,
   ImportFormat.FX_RATE,
   ImportFormat.SUBTYPE,
   ImportFormat.INSTRUMENT_TYPE,
