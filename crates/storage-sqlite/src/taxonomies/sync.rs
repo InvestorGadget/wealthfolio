@@ -17,7 +17,7 @@ const SPENDING_CATEGORIES_ID: &str = "spending_categories";
 const INCOME_SOURCES_ID: &str = "income_sources";
 const SAVINGS_CATEGORIES_ID: &str = "savings_categories";
 /// Payees are all user-created: the taxonomy is seeded empty.
-const PAYEES_ID: &str = "payees";
+pub(super) const PAYEES_ID: &str = "payees";
 
 fn is_syncable_system_taxonomy_id(taxonomy_id: &str) -> bool {
     matches!(

@@ -270,3 +270,77 @@ async fn legacy_duplicate_keys_allow_cosmetic_edits_but_not_new_collisions() {
         .await
         .is_err());
 }
+
+/// A payee is also referenced by the rules that match on it or set it beside
+/// a category. Those columns have no foreign key, so this count is all that
+/// keeps the payee from being deleted under them.
+#[tokio::test]
+async fn a_payee_named_by_a_rule_condition_or_also_set_cannot_be_deleted() {
+    let f = Fixture::new().await;
+    f.service
+        .create_category(NewCategory {
+            id: Some("payee-bakery".into()),
+            taxonomy_id: "payees".into(),
+            name: "Corner Bakery".into(),
+            key: "payee_corner_bakery".into(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let rules = |f: &Fixture| {
+        f.repo
+            .get_category_references("payees", "payee-bakery")
+            .unwrap()
+            .rules
+    };
+    assert_eq!(rules(&f), 0);
+
+    f.seed(
+        "INSERT INTO spending_categorization_rules (id,name,pattern,match_type,taxonomy_id,category_id,payee_condition_id)
+            VALUES ('by-payee','By payee','(?!)','regex','spending_categories','custom','payee-bakery');
+         INSERT INTO spending_categorization_rules (id,name,pattern,taxonomy_id,category_id,set_payee_id)
+            VALUES ('sets-payee','Sets payee','BAKERY','spending_categories','custom','payee-bakery');
+         INSERT INTO spending_categorization_rules (id,name,pattern,taxonomy_id,category_id)
+            VALUES ('target','Payee rule','BAKERY','payees','payee-bakery');",
+    );
+    assert_eq!(rules(&f), 3);
+    // A category of another taxonomy with the same id is not a payee.
+    assert_eq!(
+        f.repo
+            .get_category_references("spending_categories", "payee-bakery")
+            .unwrap()
+            .rules,
+        0
+    );
+
+    f.seed("DELETE FROM spending_categorization_rules WHERE id = 'target'");
+    assert_eq!(rules(&f), 2);
+    assert!(f
+        .service
+        .delete_category("payees", "payee-bakery")
+        .await
+        .is_err());
+    assert!(f
+        .repo
+        .delete_category("payees", "payee-bakery")
+        .await
+        .is_err());
+
+    // Each column alone holds the payee.
+    f.seed("UPDATE spending_categorization_rules SET payee_condition_id = NULL, pattern = 'X', match_type = 'contains' WHERE id = 'by-payee'");
+    assert_eq!(rules(&f), 1);
+    assert!(f
+        .service
+        .delete_category("payees", "payee-bakery")
+        .await
+        .is_err());
+
+    f.seed("UPDATE spending_categorization_rules SET set_payee_id = NULL WHERE id = 'sets-payee'");
+    assert_eq!(
+        f.service
+            .delete_category("payees", "payee-bakery")
+            .await
+            .unwrap(),
+        1
+    );
+}

@@ -55,6 +55,9 @@ struct CategoryReferencesDB {
     automatic_budget_links: i64,
 }
 
+/// What still points at a category. A payee's `rules` also counts the rules
+/// that match on it or set it beside a category: those columns have no
+/// foreign key, so this count is what keeps such a payee from being deleted.
 pub(crate) fn category_references(
     conn: &mut SqliteConnection,
     taxonomy_id: &str,
@@ -66,13 +69,13 @@ pub(crate) fn category_references(
             (SELECT COUNT(*) FROM asset_taxonomy_assignments WHERE taxonomy_id = ?1 AND category_id = ?2) AS asset_assignments,
             (SELECT COUNT(*) FROM activity_taxonomy_assignments WHERE taxonomy_id = ?1 AND category_id = ?2) AS spending_assignments,
             (SELECT COUNT(*) FROM spending_activity_splits WHERE taxonomy_id = ?1 AND category_id = ?2) AS splits,
-            (SELECT COUNT(*) FROM spending_categorization_rules WHERE taxonomy_id = ?1 AND category_id = ?2) AS rules,
+            (SELECT COUNT(*) FROM spending_categorization_rules WHERE (taxonomy_id = ?1 AND category_id = ?2) OR (?1 = ?3 AND (payee_condition_id = ?2 OR set_payee_id = ?2))) AS rules,
             (SELECT COUNT(*) FROM budget_targets WHERE taxonomy_id = ?1 AND category_id = ?2) AS budget_targets,
             (SELECT COUNT(*) FROM budget_rollover_settings WHERE taxonomy_id = ?1 AND category_id = ?2) AS budget_rollovers,
             (SELECT COUNT(*) FROM budget_group_assignments WHERE taxonomy_id = ?1 AND category_id = ?2 AND (is_system = 0 OR updated_at != created_at)) AS budget_group_assignments,
             (SELECT COUNT(*) FROM allocation_target_weights WHERE taxonomy_id = ?1 AND category_id = ?2) AS allocation_targets,
             (SELECT COUNT(*) FROM budget_group_assignments WHERE taxonomy_id = ?1 AND category_id = ?2 AND is_system = 1 AND updated_at = created_at) AS automatic_budget_links"
-    ).bind::<Text,_>(taxonomy_id).bind::<Text,_>(category_id).get_result::<CategoryReferencesDB>(conn).map_err(StorageError::from)?;
+    ).bind::<Text,_>(taxonomy_id).bind::<Text,_>(category_id).bind::<Text,_>(sync::PAYEES_ID).get_result::<CategoryReferencesDB>(conn).map_err(StorageError::from)?;
     Ok(CategoryReferences {
         children: row.children.max(0) as usize,
         asset_assignments: row.asset_assignments.max(0) as usize,
