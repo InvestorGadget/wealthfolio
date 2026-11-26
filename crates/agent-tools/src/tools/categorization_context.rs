@@ -254,7 +254,7 @@ pub async fn compute_categorization_state(
 
     let mut payee_map: HashMap<(String, String), HashMap<(String, String), usize>> = HashMap::new();
     for item in &history_response.items {
-        let Some(notes) = item.activity.bank_text() else {
+        let Some(notes) = item.activity.notes.as_deref() else {
             continue;
         };
         let payee_key = normalize_payee(notes);
@@ -278,7 +278,7 @@ pub async fn compute_categorization_state(
         if examples.len() >= MAX_TOTAL_EXAMPLES {
             break;
         }
-        let Some(notes) = item.activity.bank_text() else {
+        let Some(notes) = item.activity.notes.as_deref() else {
             continue;
         };
         for asg in &item.assignments {
@@ -367,8 +367,11 @@ pub async fn compute_categorization_state(
             }
         }
 
+        // Payee history is keyed on the notes the examples show; only rule
+        // matching reads the bank's text.
         let history_match = act
-            .bank_text()
+            .notes
+            .as_deref()
             .map(normalize_payee)
             .filter(|k| !k.is_empty())
             .and_then(|key| {

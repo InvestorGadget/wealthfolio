@@ -897,6 +897,35 @@ async fn categorization_reads_the_imported_description_and_shows_it_beside_edite
     assert_eq!(unmatched.bank_description.as_deref(), Some("SHELL 0042"));
 }
 
+/// Payee-history examples show what the user sees as the description, their
+/// notes, and never the bank's text of a categorized transaction.
+#[tokio::test]
+async fn categorization_examples_show_notes_not_the_bank_description() {
+    use wealthfolio_agent_tools::tools::categorization_context::{
+        compute_categorization_state, CategorizationFilters,
+    };
+
+    let mut env = Arc::into_inner(categorization_env()).expect("only fixture owner");
+    let mut history = fixture_cash_activity(
+        "history",
+        "acc-1",
+        "2024-06-10T00:00:00Z",
+        "Coffee run",
+        Some(("spending_categories", "cat-coffee")),
+    );
+    history.activity.imported_description = Some("PRIVATE BANK TEXT 9".to_string());
+    env.cash_activity_service = Arc::new(MockCashActivityService {
+        items: vec![history],
+    });
+
+    let state = compute_categorization_state(&env, CategorizationFilters::default())
+        .await
+        .unwrap();
+    let examples = serde_json::to_string(&state.examples).unwrap();
+    assert!(examples.contains("Coffee run"), "{examples}");
+    assert!(!examples.contains("PRIVATE BANK TEXT"), "{examples}");
+}
+
 output_test_dyn_env!(
     output_list_categorization_context_seeded,
     ListCategorizationContext,
