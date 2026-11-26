@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useId, useMemo, useState } from "react";
+import { useId, useMemo, useState, type ComponentProps } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import * as z from "zod";
@@ -105,7 +105,18 @@ export function ruleAmountPayload(
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-export const buildRuleFormSchema = (t: Translate) =>
+interface RuleFormSchemaOptions {
+  /**
+   * The rule being edited is a catch-all an earlier version saved with an
+   * empty pattern. It may keep it; a new rule needs a text or a payee.
+   */
+  keepsEmptyPattern?: boolean;
+}
+
+export const buildRuleFormSchema = (
+  t: Translate,
+  { keepsEmptyPattern = false }: RuleFormSchemaOptions = {},
+) =>
   z
     .object({
       name: z.string().min(1, t("spending:rules.nameRequired")),
@@ -139,7 +150,7 @@ export const buildRuleFormSchema = (t: Translate) =>
         pattern: data.pattern,
         list: data.patternList,
       });
-      if (!stored.pattern && !data.payeeConditionId) {
+      if (!stored.pattern.trim() && !data.payeeConditionId && !keepsEmptyPattern) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           message: t("spending:rules.conditionRequired"),
@@ -250,10 +261,24 @@ interface RulePayeePickerProps {
   labelId: string;
 }
 
-/** Picks one existing payee, by the searchable list the transaction form uses. */
-function RulePayeePicker({ value, onChange, payees, placeholder, labelId }: RulePayeePickerProps) {
+/**
+ * Picks one existing payee, by the searchable list the transaction form uses.
+ * Rendered inside `FormControl`, which hands the trigger its id (for the
+ * label), `aria-describedby` (hint and error) and `aria-invalid`. Its name is
+ * the label followed by the picked payee.
+ */
+function RulePayeePicker({
+  value,
+  onChange,
+  payees,
+  placeholder,
+  labelId,
+  ...controlProps
+}: RulePayeePickerProps &
+  Pick<ComponentProps<"button">, "id" | "ref" | "aria-describedby" | "aria-invalid">) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  const valueId = useId();
   // A rule can name a payee that has since been deleted on another device.
   // It keeps its place so the id survives a save untouched.
   const name = value
@@ -264,14 +289,18 @@ function RulePayeePicker({ value, onChange, payees, placeholder, labelId }: Rule
       <PopoverTrigger
         render={
           <Button
+            {...controlProps}
             type="button"
             variant="field"
-            aria-labelledby={labelId}
+            aria-labelledby={`${labelId} ${valueId}`}
             className="w-full justify-between"
           />
         }
       >
-        <span className={name ? "min-w-0 truncate" : "text-muted-foreground min-w-0 truncate"}>
+        <span
+          id={valueId}
+          className={name ? "min-w-0 truncate" : "text-muted-foreground min-w-0 truncate"}
+        >
           {name || placeholder}
         </span>
         <Icons.ChevronDown className="ms-2 h-4 w-4 shrink-0 opacity-50" aria-hidden="true" />
@@ -301,7 +330,13 @@ export function RuleForm({
 }: RuleFormProps) {
   const { t } = useTranslation();
 
-  const ruleFormSchema = useMemo(() => buildRuleFormSchema(t), [t]);
+  // A catch-all an earlier version saved (an empty pattern, no payee) can be
+  // edited without giving it a text.
+  const keepsEmptyPattern = !!rule && rule.pattern.trim() === "" && !rule.payeeConditionId;
+  const ruleFormSchema = useMemo(
+    () => buildRuleFormSchema(t, { keepsEmptyPattern }),
+    [t, keepsEmptyPattern],
+  );
 
   const AMOUNT_OP_OPTIONS = useMemo<{ value: RuleAmountOp; label: string }[]>(
     () => [
@@ -528,13 +563,15 @@ export function RuleForm({
                   {t("spending:rules.amountOptional")}
                 </span>
               </div>
-              <RulePayeePicker
-                value={(field.value as string | null) ?? null}
-                onChange={field.onChange}
-                payees={payeeOptions}
-                placeholder={t("spending:rules.payeeConditionAny")}
-                labelId={payeeConditionLabelId}
-              />
+              <FormControl>
+                <RulePayeePicker
+                  value={(field.value as string | null) ?? null}
+                  onChange={field.onChange}
+                  payees={payeeOptions}
+                  placeholder={t("spending:rules.payeeConditionAny")}
+                  labelId={payeeConditionLabelId}
+                />
+              </FormControl>
               <FormDescription>{t("spending:rules.payeeConditionHint")}</FormDescription>
               <FormMessage />
             </FormItem>
@@ -659,13 +696,15 @@ export function RuleForm({
                     {t("spending:rules.amountOptional")}
                   </span>
                 </div>
-                <RulePayeePicker
-                  value={(field.value as string | null) ?? null}
-                  onChange={field.onChange}
-                  payees={payeeOptions}
-                  placeholder={t("spending:rules.setPayeeNone")}
-                  labelId={setPayeeLabelId}
-                />
+                <FormControl>
+                  <RulePayeePicker
+                    value={(field.value as string | null) ?? null}
+                    onChange={field.onChange}
+                    payees={payeeOptions}
+                    placeholder={t("spending:rules.setPayeeNone")}
+                    labelId={setPayeeLabelId}
+                  />
+                </FormControl>
                 <FormDescription>{t("spending:rules.setPayeeHint")}</FormDescription>
                 <FormMessage />
               </FormItem>

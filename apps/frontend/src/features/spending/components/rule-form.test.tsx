@@ -198,6 +198,13 @@ describe("rule form conditions", () => {
     );
   });
 
+  it("lets a catch-all an earlier version saved keep its empty pattern", () => {
+    const legacy = buildRuleFormSchema(t, { keepsEmptyPattern: true });
+    expect(legacy.safeParse({ ...baseValues, pattern: "" }).success).toBe(true);
+    // A new rule may not have one.
+    expect(messages({ ...baseValues, pattern: "" })).toContain("spending:rules.conditionRequired");
+  });
+
   it("refuses a payee condition on a rule that sets a payee as its target", () => {
     const values = { ...baseValues, categoryId: "payees:p2", payeeConditionId: "p1" };
     expect(errorPaths(values)).toContainEqual(["categoryId"]);
@@ -257,9 +264,9 @@ describe("rule form payee fields", () => {
     // The placeholder the rule is stored with is never shown.
     expect(screen.getByLabelText("Pattern")).toHaveValue("");
     expect(screen.queryByDisplayValue("(?!)")).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Payee is" })).toHaveTextContent("Corner Bakery");
+    expect(screen.getByRole("button", { name: /^Payee is/ })).toHaveTextContent("Corner Bakery");
     // A rule that matches on a payee does not offer to set one.
-    expect(screen.queryByRole("button", { name: "Also set payee" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Also set payee/ })).not.toBeInTheDocument();
 
     const values = await submitted(onSubmit);
     expect(values).toMatchObject({
@@ -271,15 +278,40 @@ describe("rule form payee fields", () => {
     expect(values).not.toHaveProperty("patternList");
   });
 
+  it("names a payee picker by its label and its payee, and links its hint", () => {
+    renderForm(storedRule({ payeeConditionId: "p1" }));
+
+    const picker = screen.getByRole("button", { name: "Payee is Corner Bakery" });
+    expect(screen.getByLabelText(/^Payee is/)).toBe(picker);
+    expect(picker).toHaveAccessibleDescription(
+      "Only matches transactions filed under this payee, by you or by another rule. With a payee, the pattern can be left empty.",
+    );
+    expect(picker).toHaveAttribute("aria-invalid", "false");
+  });
+
+  it("names an empty payee picker by what it means", () => {
+    renderForm(storedRule({}));
+
+    expect(screen.getByRole("button", { name: "Payee is Any payee" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Also set payee No payee" })).toBeInTheDocument();
+  });
+
+  it("saves a catch-all an earlier version saved with its empty pattern", async () => {
+    const onSubmit = renderForm(storedRule({ pattern: "", matchType: "exact" }));
+
+    expect(screen.getByLabelText("Pattern")).toHaveValue("");
+    expect(await submitted(onSubmit)).toMatchObject({ pattern: "", matchType: "exact" });
+  });
+
   it("picks and clears the payee a rule matches on", async () => {
     const user = userEvent.setup();
     const onSubmit = renderForm(storedRule({}));
 
-    await user.click(screen.getByRole("button", { name: "Payee is" }));
+    await user.click(screen.getByRole("button", { name: /^Payee is/ }));
     await user.click(await screen.findByRole("option", { name: "Amazon" }));
-    expect(screen.getByRole("button", { name: "Payee is" })).toHaveTextContent("Amazon");
+    expect(screen.getByRole("button", { name: /^Payee is/ })).toHaveTextContent("Amazon");
     // Only an existing payee can be picked here: no row to add a new one.
-    await user.click(screen.getByRole("button", { name: "Payee is" }));
+    await user.click(screen.getByRole("button", { name: /^Payee is/ }));
     await user.type(screen.getByPlaceholderText("Search or add a payee"), "Nobody");
     expect(screen.queryByText(/Add "Nobody"/)).not.toBeInTheDocument();
     await user.keyboard("{Escape}");
@@ -290,14 +322,14 @@ describe("rule form payee fields", () => {
   it("shows the payee a category rule also sets and saves it", async () => {
     const onSubmit = renderForm(storedRule({ setPayeeId: "p2" }));
 
-    expect(screen.getByRole("button", { name: "Also set payee" })).toHaveTextContent("Amazon");
+    expect(screen.getByRole("button", { name: /^Also set payee/ })).toHaveTextContent("Amazon");
     expect(await submitted(onSubmit)).toMatchObject({ setPayeeId: "p2", payeeConditionId: null });
   });
 
   it("keeps a payee that no longer exists, under a name that says so", async () => {
     const onSubmit = renderForm(storedRule({ payeeConditionId: "gone" }));
 
-    expect(screen.getByRole("button", { name: "Payee is" })).toHaveTextContent("Unknown payee");
+    expect(screen.getByRole("button", { name: /^Payee is/ })).toHaveTextContent("Unknown payee");
     expect(await submitted(onSubmit)).toMatchObject({ payeeConditionId: "gone" });
   });
 
@@ -306,7 +338,7 @@ describe("rule form payee fields", () => {
       storedRule({ taxonomyId: "payees", categoryId: "p1", setPayeeId: "p2" }),
     );
 
-    expect(screen.queryByRole("button", { name: "Also set payee" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Also set payee/ })).not.toBeInTheDocument();
     expect(await submitted(onSubmit)).toMatchObject({ setPayeeId: null });
   });
 
