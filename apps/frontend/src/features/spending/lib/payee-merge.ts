@@ -2,6 +2,7 @@ import { deleteCategory } from "@/adapters";
 
 import { movePayeeActivities } from "../adapters/cash-activities";
 import { listCategorizationRules, updateCategorizationRule } from "../adapters/rules";
+import type { UpdateCategorizationRule } from "../types/rule";
 import { PAYEES_TAXONOMY_ID } from "./payee";
 
 /**
@@ -9,7 +10,9 @@ import { PAYEES_TAXONOMY_ID } from "./payee";
  *
  * The transactions move in one write, on every account: one left on an
  * account no longer in Spending would keep the payee from being deleted. The
- * rules and the delete are ordinary writes after it, not one transaction.
+ * rules and the delete are ordinary writes after it, not one transaction. A
+ * rule is moved wherever it names the payee: as its target, as the payee it
+ * matches on, or as the payee it also sets.
  * Each step only moves things toward the destination, and the delete at the
  * end is refused by the server while anything still points at the source, so
  * a merge that stops halfway loses nothing and finishes when it is run again.
@@ -21,8 +24,14 @@ export async function mergePayee(sourceId: string, destinationId: string): Promi
 
   const rules = await listCategorizationRules();
   for (const rule of rules) {
-    if (rule.taxonomyId !== PAYEES_TAXONOMY_ID || rule.categoryId !== sourceId) continue;
-    await updateCategorizationRule(rule.id, { categoryId: destinationId });
+    const patch: UpdateCategorizationRule = {};
+    if (rule.taxonomyId === PAYEES_TAXONOMY_ID && rule.categoryId === sourceId) {
+      patch.categoryId = destinationId;
+    }
+    if (rule.payeeConditionId === sourceId) patch.payeeConditionId = destinationId;
+    if (rule.setPayeeId === sourceId) patch.setPayeeId = destinationId;
+    if (Object.keys(patch).length === 0) continue;
+    await updateCategorizationRule(rule.id, patch);
   }
 
   await deleteCategory(PAYEES_TAXONOMY_ID, sourceId);

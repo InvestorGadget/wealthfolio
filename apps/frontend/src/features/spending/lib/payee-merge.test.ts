@@ -15,8 +15,8 @@ vi.mock("../adapters/rules", () => ({
   updateCategorizationRule: vi.fn(() => Promise.resolve()),
 }));
 
-const rule = (id: string, taxonomyId: string, categoryId: string) =>
-  ({ id, taxonomyId, categoryId }) as never;
+const rule = (id: string, taxonomyId: string, categoryId: string, payees: object = {}) =>
+  ({ id, taxonomyId, categoryId, ...payees }) as never;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -53,6 +53,27 @@ describe("mergePayee", () => {
     expect(updateCategorizationRule).toHaveBeenCalledWith("r-old", { categoryId: "new" });
     expect(deleteCategory).toHaveBeenCalledWith("payees", "old");
     expect(steps).toEqual(["transactions", "rules", "delete"]);
+  });
+
+  it("moves a rule that matches on the payee or also sets it", async () => {
+    vi.mocked(listCategorizationRules).mockResolvedValue([
+      rule("r-condition", "spending_categories", "cat", { payeeConditionId: "old" }),
+      rule("r-also-sets", "spending_categories", "cat", { setPayeeId: "old" }),
+      rule("r-other", "spending_categories", "cat", {
+        payeeConditionId: "other",
+        setPayeeId: null,
+      }),
+      rule("r-target", "payees", "old"),
+    ]);
+
+    await mergePayee("old", "new");
+
+    expect(vi.mocked(updateCategorizationRule).mock.calls).toEqual([
+      ["r-condition", { payeeConditionId: "new" }],
+      ["r-also-sets", { setPayeeId: "new" }],
+      ["r-target", { categoryId: "new" }],
+    ]);
+    expect(deleteCategory).toHaveBeenCalledWith("payees", "old");
   });
 
   it("does not delete the payee when its transactions could not be moved", async () => {

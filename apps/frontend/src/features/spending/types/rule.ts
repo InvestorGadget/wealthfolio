@@ -28,6 +28,10 @@ export interface CategorizationRule {
   amountOp?: RuleAmountOp | null;
   amountValue?: number | null;
   amountValue2?: number | null;
+  /** The rule only matches transactions filed under this payee. */
+  payeeConditionId?: string | null;
+  /** A payee a category rule also sets, beside its category. */
+  setPayeeId?: string | null;
   priority: number;
   isGlobal: boolean;
   accountId?: string | null;
@@ -52,6 +56,8 @@ export interface NewCategorizationRule {
   amountOp?: RuleAmountOp | null;
   amountValue?: number | null;
   amountValue2?: number | null;
+  payeeConditionId?: string | null;
+  setPayeeId?: string | null;
   priority?: number;
   isGlobal?: boolean;
   accountId?: string | null;
@@ -71,6 +77,9 @@ export interface UpdateCategorizationRule {
   amountOp?: RuleAmountOp | null;
   amountValue?: number | null;
   amountValue2?: number | null;
+  /** Omitted keeps the stored payee; an explicit null clears it. */
+  payeeConditionId?: string | null;
+  setPayeeId?: string | null;
   priority?: number;
   isGlobal?: boolean;
   accountId?: string | null;
