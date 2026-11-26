@@ -525,8 +525,10 @@ impl CashActivityService {
             let needle = needle.trim().to_lowercase();
             if !needle.is_empty() {
                 activities.retain(|a| {
-                    let notes = a.notes.as_deref().unwrap_or("").to_lowercase();
-                    notes.contains(&needle)
+                    [a.notes.as_deref(), a.imported_description.as_deref()]
+                        .into_iter()
+                        .flatten()
+                        .any(|text| text.to_lowercase().contains(&needle))
                 });
             }
         }
@@ -1544,9 +1546,9 @@ mod tests {
 
     fn activity(activity_type: &str) -> Activity {
         Activity {
+            imported_description: None,
             id: "activity-1".to_string(),
             account_id: "account-1".to_string(),
-            imported_description: None,
             asset_id: None,
             activity_type: activity_type.to_string(),
             activity_type_override: None,
@@ -2799,6 +2801,46 @@ mod tests {
                 amount: 600.0,
             }]
         );
+    }
+
+    #[tokio::test]
+    async fn search_matches_the_imported_description_as_well_as_notes() {
+        let described = |id: &str, notes: &str, description: Option<&str>| Activity {
+            notes: Some(notes.to_string()),
+            imported_description: description.map(str::to_string),
+            ..cash_row(id, "WITHDRAWAL", 10, "USD")
+        };
+        let (service, _, _) = make_service_with(vec![
+            described("edited", "Weekly shop", Some("TESCO STORES 3301")),
+            described("manual", "Tesco with Sam", None),
+            described("other", "Fuel", Some("SHELL 0042")),
+        ]);
+        let found = |needle: &'static str| {
+            let service = &service;
+            async move {
+                let mut ids: Vec<String> = service
+                    .search(
+                        CashActivitySearchRequest {
+                            search: Some(needle.to_string()),
+                            limit: 50,
+                            ..Default::default()
+                        },
+                        None,
+                        "UTC",
+                    )
+                    .await
+                    .unwrap()
+                    .items
+                    .into_iter()
+                    .map(|item| item.activity.id)
+                    .collect();
+                ids.sort();
+                ids
+            }
+        };
+        assert_eq!(found("tesco").await, vec!["edited", "manual"]);
+        assert_eq!(found("weekly").await, vec!["edited"]);
+        assert_eq!(found("shell").await, vec!["other"]);
     }
 
     /// The reported case: a transfer filter used to answer with nothing,

@@ -53,7 +53,8 @@ pub enum SortDirection {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CashActivitySearchRequest {
-    /// Free-text search over notes (payee). Case-insensitive contains-match.
+    /// Free-text search over notes and the imported bank description.
+    /// Case-insensitive contains-match.
     pub search: Option<String>,
     /// Explicit rows, still intersected with eligible Spending accounts and other filters.
     pub activity_ids: Option<Vec<String>>,

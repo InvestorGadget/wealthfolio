@@ -816,6 +816,87 @@ async fn incompatible_savings_rule_does_not_hide_compatible_rule_proposals() {
     assert!(state.unproposed.is_empty());
 }
 
+/// Rules and payee history read the bank's text, and the model is shown it
+/// beside notes the user rewrote.
+#[tokio::test]
+async fn categorization_reads_the_imported_description_and_shows_it_beside_edited_notes() {
+    use wealthfolio_agent_tools::tools::categorization_context::{
+        compute_categorization_state, CategorizationFilters,
+    };
+    use wealthfolio_spending::categorization_rules::{CategorizationRule, RuleMatchType};
+
+    let mut env = Arc::into_inner(categorization_env()).expect("only fixture owner");
+    let row = |id: &str, notes: &str, description: Option<&str>| {
+        let mut row = fixture_cash_activity(id, "acc-1", "2024-06-15T00:00:00Z", notes, None);
+        row.activity.imported_description = description.map(str::to_string);
+        row
+    };
+    env.cash_activity_service = Arc::new(MockCashActivityService {
+        items: vec![
+            row("edited", "Morning treat", Some("BLUE BOTTLE COFFEE 114")),
+            row("notes-mention", "COFFEE with Sam", Some("SHELL 0042")),
+            row("unedited", "COFFEE BEAN 7", Some("COFFEE BEAN 7")),
+            row("manual", "COFFEE at the market", None),
+        ],
+    });
+    let now = Utc::now().naive_utc();
+    env.categorization_rules_service = Arc::new(MockCategorizationRulesService {
+        rules: vec![CategorizationRule {
+            id: "coffee".to_string(),
+            name: "Coffee".to_string(),
+            pattern: "COFFEE".to_string(),
+            match_type: RuleMatchType::Contains,
+            taxonomy_id: Some("spending_categories".to_string()),
+            category_id: Some("cat-coffee".to_string()),
+            activity_type: None,
+            amount_op: None,
+            amount_value: None,
+            amount_value2: None,
+            priority: 1,
+            is_global: true,
+            account_id: None,
+            preset_id: None,
+            preset_rule_key: None,
+            preset_version: None,
+            preset_modified: false,
+            created_at: now,
+            updated_at: now,
+        }],
+    });
+
+    let state = compute_categorization_state(&env, CategorizationFilters::default())
+        .await
+        .unwrap();
+    let proposed = |id: &str| {
+        state
+            .proposals
+            .iter()
+            .find(|proposal| proposal.activity_id == id)
+            .unwrap_or_else(|| panic!("{id} is proposed"))
+    };
+    let edited = proposed("edited");
+    assert_eq!(edited.source, "rule");
+    assert_eq!(edited.notes.as_deref(), Some("Morning treat"));
+    assert_eq!(
+        edited.bank_description.as_deref(),
+        Some("BLUE BOTTLE COFFEE 114")
+    );
+    // Shown once when the notes are still the bank's text, and not at all
+    // for a manual entry, whose output is as it was before the field.
+    assert_eq!(proposed("unedited").bank_description, None);
+    let manual = proposed("manual");
+    assert_eq!(manual.bank_description, None);
+    assert!(serde_json::to_value(manual)
+        .unwrap()
+        .get("bankDescription")
+        .is_none());
+
+    assert_eq!(state.unproposed.len(), 1, "{:?}", state.unproposed);
+    let unmatched = &state.unproposed[0];
+    assert_eq!(unmatched.activity_id, "notes-mention");
+    assert_eq!(unmatched.bank_description.as_deref(), Some("SHELL 0042"));
+}
+
 output_test_dyn_env!(
     output_list_categorization_context_seeded,
     ListCategorizationContext,
