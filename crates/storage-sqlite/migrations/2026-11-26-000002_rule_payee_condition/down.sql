@@ -1,0 +1,2 @@
+ALTER TABLE spending_categorization_rules DROP COLUMN set_payee_id;
+ALTER TABLE spending_categorization_rules DROP COLUMN payee_condition_id;

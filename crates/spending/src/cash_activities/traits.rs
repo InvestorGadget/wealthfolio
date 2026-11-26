@@ -25,6 +25,12 @@ pub trait CashActivityServiceTrait: Send + Sync {
         Err(anyhow::anyhow!("Rule source unavailable"))
     }
 
+    /// The ids of the payees that exist, for the owning rule service: a rule
+    /// that names a payee that is gone must neither match nor write it.
+    async fn payee_ids(&self) -> Result<std::collections::HashSet<String>> {
+        Err(anyhow::anyhow!("Payee source unavailable"))
+    }
+
     async fn set_event_reviewed(
         &self,
         activity_id: &str,
@@ -60,6 +66,10 @@ impl CashActivityServiceTrait for CashActivityService {
         taxonomy_id: &str,
     ) -> Result<()> {
         CashActivityService::clear_allocations_reviewed(self, expected, taxonomy_id).await
+    }
+
+    async fn payee_ids(&self) -> Result<std::collections::HashSet<String>> {
+        CashActivityService::payee_ids(self)
     }
 
     async fn list_for_rules(&self, account_ids: &[String]) -> Result<Vec<CashActivity>> {

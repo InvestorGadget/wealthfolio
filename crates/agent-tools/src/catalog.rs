@@ -380,6 +380,8 @@ mod tests {
                 amount_op: rule.amount_op,
                 amount_value: rule.amount_value,
                 amount_value2: rule.amount_value2,
+                payee_condition_id: rule.payee_condition_id.clone(),
+                set_payee_id: rule.set_payee_id.clone(),
                 priority: rule.priority,
                 is_global: rule.is_global,
                 account_id: rule.account_id.clone(),

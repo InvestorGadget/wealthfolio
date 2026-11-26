@@ -679,6 +679,8 @@ diesel::table! {
         amount_op -> Nullable<Text>,
         amount_value -> Nullable<Text>,
         amount_value2 -> Nullable<Text>,
+        payee_condition_id -> Nullable<Text>,
+        set_payee_id -> Nullable<Text>,
     }
 }
 

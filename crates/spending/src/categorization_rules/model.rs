@@ -71,6 +71,23 @@ impl RuleAmountOp {
     }
 }
 
+/// The pattern a rule without a text condition is stored with, beside
+/// `match_type = regex`. A rule that only has a payee condition has no text to
+/// match, but `pattern` is NOT NULL and older app versions do not know the
+/// payee columns: an empty `contains` pattern would match every activity
+/// there. The regex crate has no look-around, so this pattern never compiles
+/// and a rule stored with it never matches on a version that does not know
+/// what it stands for (`invalid_regex_never_matches_but_doesnt_crash`).
+pub const NO_TEXT_CONDITION_PATTERN: &str = "(?!)";
+
+/// Whether a stored `(match_type, pattern)` pair is a text condition at all.
+/// The placeholder above is none, and neither is an empty pattern: `contains
+/// ""` holds for every activity, which is a missing condition, not a broad one.
+pub fn is_text_condition(match_type: RuleMatchType, pattern: &str) -> bool {
+    !pattern.trim().is_empty()
+        && !(match_type == RuleMatchType::Regex && pattern == NO_TEXT_CONDITION_PATTERN)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CategorizationRule {
@@ -86,6 +103,14 @@ pub struct CategorizationRule {
     pub amount_op: Option<RuleAmountOp>,
     pub amount_value: Option<Decimal>,
     pub amount_value2: Option<Decimal>,
+    /// The rule only matches an activity whose payee is this one: the payee
+    /// this run's rules give it, else the one it already has. A rule with a
+    /// payee condition cannot itself set a payee.
+    #[serde(default)]
+    pub payee_condition_id: Option<String>,
+    /// A payee a category rule also sets, beside its category.
+    #[serde(default)]
+    pub set_payee_id: Option<String>,
     pub priority: i32,
     pub is_global: bool,
     pub account_id: Option<String>,
@@ -98,6 +123,24 @@ pub struct CategorizationRule {
     pub preset_modified: bool,
     pub created_at: NaiveDateTime,
     pub updated_at: NaiveDateTime,
+}
+
+impl CategorizationRule {
+    /// Whether the rule matches on the activity's text. A rule without a text
+    /// condition matches on its payee condition alone, or never.
+    pub fn has_text_condition(&self) -> bool {
+        is_text_condition(self.match_type, &self.pattern)
+    }
+
+    /// The payee the rule files a matching activity under: its target when it
+    /// is a payee rule, else the payee it sets beside its category.
+    pub fn payee_to_set(&self) -> Option<&str> {
+        if self.taxonomy_id.as_deref() == Some(crate::activity_assignments::PAYEES_TAXONOMY) {
+            self.category_id.as_deref()
+        } else {
+            self.set_payee_id.as_deref()
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +157,10 @@ pub struct NewCategorizationRule {
     pub amount_op: Option<RuleAmountOp>,
     pub amount_value: Option<Decimal>,
     pub amount_value2: Option<Decimal>,
+    #[serde(default)]
+    pub payee_condition_id: Option<String>,
+    #[serde(default)]
+    pub set_payee_id: Option<String>,
     #[serde(default)]
     pub priority: i32,
     #[serde(default = "default_true")]
@@ -150,6 +197,11 @@ pub struct UpdateCategorizationRule {
     pub amount_value: Option<Option<Decimal>>,
     #[serde(default, deserialize_with = "deserialize_optional")]
     pub amount_value2: Option<Option<Decimal>>,
+    /// Omitted keeps the stored value; an explicit null clears it.
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub payee_condition_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub set_payee_id: Option<Option<String>>,
     pub priority: Option<i32>,
     pub is_global: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_optional_string")]
@@ -216,6 +268,49 @@ mod tests {
         assert_eq!(patch.amount_op, None);
         assert_eq!(patch.amount_value, None);
         assert_eq!(patch.amount_value2, None);
+    }
+
+    #[test]
+    fn update_rule_payee_fields_are_triple_state() {
+        let patch: UpdateCategorizationRule =
+            serde_json::from_value(serde_json::json!({ "name": "x" })).expect("deserialize patch");
+        assert_eq!(patch.payee_condition_id, None);
+        assert_eq!(patch.set_payee_id, None);
+
+        let patch: UpdateCategorizationRule = serde_json::from_value(serde_json::json!({
+            "payeeConditionId": null,
+            "setPayeeId": "payee-1"
+        }))
+        .expect("deserialize patch");
+        assert_eq!(patch.payee_condition_id, Some(None));
+        assert_eq!(patch.set_payee_id, Some(Some("payee-1".to_string())));
+    }
+
+    #[test]
+    fn a_rule_saved_before_the_payee_fields_still_deserializes() {
+        let rule: NewCategorizationRule = serde_json::from_value(serde_json::json!({
+            "name": "Coffee",
+            "pattern": "CAFE"
+        }))
+        .expect("deserialize rule");
+        assert_eq!(rule.payee_condition_id, None);
+        assert_eq!(rule.set_payee_id, None);
+    }
+
+    #[test]
+    fn the_placeholder_and_an_empty_pattern_are_no_text_condition() {
+        assert!(!is_text_condition(
+            RuleMatchType::Regex,
+            NO_TEXT_CONDITION_PATTERN
+        ));
+        assert!(!is_text_condition(RuleMatchType::Contains, ""));
+        assert!(!is_text_condition(RuleMatchType::Exact, "  "));
+        assert!(is_text_condition(RuleMatchType::Contains, "AMAZON"));
+        // As plain text the placeholder is text like any other.
+        assert!(is_text_condition(
+            RuleMatchType::Contains,
+            NO_TEXT_CONDITION_PATTERN
+        ));
     }
 
     #[test]

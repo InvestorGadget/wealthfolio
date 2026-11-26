@@ -18,6 +18,25 @@ pub struct CompiledRule<'r> {
     pub rule: &'r CategorizationRule,
     pattern_upper: String,
     regex: Option<Regex>,
+    has_text_condition: bool,
+}
+
+/// What a rule is matched against: one activity, as the rule run sees it.
+#[derive(Debug, Clone, Copy)]
+pub struct RuleInput<'a> {
+    /// The notes in upper case, for the case-insensitive match types.
+    pub notes_upper: &'a str,
+    /// The notes as written: a regex matches the original casing.
+    pub notes_raw: &'a str,
+    pub activity_type: &'a str,
+    pub account_id: &'a str,
+    /// The activity's unsigned amount (`activity.amount.map(|d| d.abs())`).
+    /// An activity without an amount never matches a rule that has an amount
+    /// condition.
+    pub amount: Option<Decimal>,
+    /// The payee the activity is filed under once the payee rules have run,
+    /// for rules with a payee condition. `None` matches none of them.
+    pub payee_id: Option<&'a str>,
 }
 
 pub const MAX_REGEX_PATTERN_LEN: usize = 512;
@@ -37,7 +56,8 @@ pub fn compile_rules(rules: &[CategorizationRule]) -> Vec<CompiledRule<'_>> {
     rules
         .iter()
         .map(|rule| {
-            let regex = if matches!(rule.match_type, RuleMatchType::Regex) {
+            let has_text_condition = rule.has_text_condition();
+            let regex = if has_text_condition && matches!(rule.match_type, RuleMatchType::Regex) {
                 match compile_regex_pattern(&rule.pattern) {
                     Ok(re) => Some(re),
                     Err(err) => {
@@ -52,25 +72,39 @@ pub fn compile_rules(rules: &[CategorizationRule]) -> Vec<CompiledRule<'_>> {
                 rule,
                 pattern_upper: rule.pattern.to_uppercase(),
                 regex,
+                has_text_condition,
             }
         })
         .collect()
 }
 
-/// Highest-priority match against a precompiled rule set. Callers that loop
-/// over many activities should normalize each activity's notes to uppercase
-/// once and pass it as `notes_upper`; `notes_raw` is needed for regex
-/// matching (regex matches against the original casing, same as today).
-/// `amount` must be the activity's unsigned amount (callers pass
-/// `activity.amount.map(|d| d.abs())`); an activity without an amount never
-/// matches a rule that has an amount condition.
+/// How narrowly a rule matches, to choose between rules of equal priority: a
+/// rule that names a payee beats one that names an exact text, which beats a
+/// prefix, which beats a fragment or a regex. It is derived from the rule each
+/// time and stored nowhere; rules of equal priority and specificity keep the
+/// order they are listed in (oldest first).
+fn specificity(rule: &CategorizationRule) -> u8 {
+    if rule.payee_condition_id.is_some() {
+        return 3;
+    }
+    match rule.match_type {
+        RuleMatchType::Exact => 2,
+        RuleMatchType::StartsWith => 1,
+        RuleMatchType::Contains | RuleMatchType::Regex => 0,
+    }
+}
+
+/// The best match in a precompiled rule set: the highest priority, then the
+/// most specific rule (see [`specificity`]), then the first listed. Callers
+/// that loop over many activities should normalize each activity's notes to
+/// uppercase once.
+///
+/// A rule with a payee condition matches only an activity filed under that
+/// payee. A rule without a text condition matches on its payee condition
+/// alone; with neither it never matches.
 pub fn match_compiled<'c, 'r: 'c>(
     compiled: impl IntoIterator<Item = &'c CompiledRule<'r>>,
-    notes_upper: &str,
-    notes_raw: &str,
-    activity_type: &str,
-    account_id: &str,
-    amount: Option<Decimal>,
+    input: &RuleInput<'_>,
 ) -> Option<RuleMatch<'r>> {
     let mut best: Option<&CategorizationRule> = None;
 
@@ -79,19 +113,19 @@ pub fn match_compiled<'c, 'r: 'c>(
 
         if !rule.is_global {
             match &rule.account_id {
-                Some(rule_acc) if rule_acc == account_id => {}
+                Some(rule_acc) if rule_acc == input.account_id => {}
                 _ => continue,
             }
         }
 
         if let Some(rt) = &rule.activity_type {
-            if rt != activity_type {
+            if rt != input.activity_type {
                 continue;
             }
         }
 
         if let Some(op) = rule.amount_op {
-            let (Some(amt), Some(value)) = (amount, rule.amount_value) else {
+            let (Some(amt), Some(value)) = (input.amount, rule.amount_value) else {
                 continue;
             };
             let amount_matched = match op {
@@ -109,11 +143,24 @@ pub fn match_compiled<'c, 'r: 'c>(
             }
         }
 
-        let matched = match rule.match_type {
-            RuleMatchType::Contains => notes_upper.contains(&c.pattern_upper),
-            RuleMatchType::StartsWith => notes_upper.starts_with(&c.pattern_upper),
-            RuleMatchType::Exact => notes_upper == c.pattern_upper,
-            RuleMatchType::Regex => c.regex.as_ref().is_some_and(|re| re.is_match(notes_raw)),
+        if let Some(payee) = rule.payee_condition_id.as_deref() {
+            if input.payee_id != Some(payee) {
+                continue;
+            }
+        }
+
+        let matched = if c.has_text_condition {
+            match rule.match_type {
+                RuleMatchType::Contains => input.notes_upper.contains(&c.pattern_upper),
+                RuleMatchType::StartsWith => input.notes_upper.starts_with(&c.pattern_upper),
+                RuleMatchType::Exact => input.notes_upper == c.pattern_upper,
+                RuleMatchType::Regex => c
+                    .regex
+                    .as_ref()
+                    .is_some_and(|re| re.is_match(input.notes_raw)),
+            }
+        } else {
+            rule.payee_condition_id.is_some()
         };
 
         if !matched {
@@ -122,7 +169,12 @@ pub fn match_compiled<'c, 'r: 'c>(
 
         match best {
             None => best = Some(rule),
-            Some(current) if rule.priority > current.priority => best = Some(rule),
+            Some(current)
+                if (rule.priority, specificity(rule))
+                    > (current.priority, specificity(current)) =>
+            {
+                best = Some(rule)
+            }
             _ => {}
         }
     }
@@ -133,32 +185,123 @@ pub fn match_compiled<'c, 'r: 'c>(
 /// Select priority within the activity's cash-flow taxonomy. A rule that cannot
 /// apply must not hide a compatible rule. Targetless rules retain their existing
 /// priority so callers can continue reporting matches without a category target.
-pub fn match_compiled_for_taxonomy<'r>(
-    compiled: &[CompiledRule<'r>],
+pub fn match_compiled_for_taxonomy<'c, 'r: 'c>(
+    compiled: impl IntoIterator<Item = &'c CompiledRule<'r>>,
     taxonomy_id: Option<&str>,
-    notes_upper: &str,
-    notes_raw: &str,
-    activity_type: &str,
-    account_id: &str,
-    amount: Option<Decimal>,
+    input: &RuleInput<'_>,
 ) -> Option<RuleMatch<'r>> {
     match_compiled(
-        compiled.iter().filter(|candidate| {
+        compiled.into_iter().filter(|candidate| {
             candidate.rule.category_id.is_none()
                 || candidate.rule.taxonomy_id.is_none()
                 || candidate.rule.taxonomy_id.as_deref() == taxonomy_id
         }),
-        notes_upper,
-        notes_raw,
-        activity_type,
-        account_id,
-        amount,
+        input,
     )
 }
 
-/// Single-shot match against an un-compiled rule slice. Convenience for the
-/// rule-tester / single-activity paths where the per-call compile cost is
-/// negligible. Bulk paths should use [`compile_rules`] + [`match_compiled`].
+/// The two passes of a rule run over one compiled rule set.
+///
+/// A payee sits beside the category instead of competing with it, so payees
+/// are matched in a pass of their own: one activity can take its category
+/// from one rule and its payee from another. The payee pass comes first, so
+/// that the category pass can match on the payee it leaves (see
+/// [`effective_payee`]).
+pub struct RulePasses<'c, 'r> {
+    payee_setters: Vec<&'c CompiledRule<'r>>,
+    category_rules: Vec<&'c CompiledRule<'r>>,
+}
+
+impl<'c, 'r> RulePasses<'c, 'r> {
+    /// `known_payees` are the payees that exist. A rule can name one that is
+    /// gone: the payee columns have no foreign key, and a peer can delete a
+    /// payee another peer's rule uses. Such a rule sets no payee, and a rule
+    /// conditioned on it matches nothing. Payee targets are held by a foreign
+    /// key, so when no rule uses the other columns `None` skips the lookup.
+    pub fn new(
+        compiled: &'c [CompiledRule<'r>],
+        known_payees: Option<&std::collections::HashSet<String>>,
+    ) -> Self {
+        let is_known = |payee_id: &str| known_payees.is_none_or(|known| known.contains(payee_id));
+        Self {
+            payee_setters: compiled
+                .iter()
+                .filter(|c| c.rule.payee_to_set().is_some_and(is_known))
+                .collect(),
+            category_rules: compiled
+                .iter()
+                .filter(|c| {
+                    c.rule.taxonomy_id.as_deref()
+                        != Some(crate::activity_assignments::PAYEES_TAXONOMY)
+                })
+                .filter(|c| c.rule.payee_condition_id.as_deref().is_none_or(is_known))
+                .collect(),
+        }
+    }
+
+    /// Whether any of `rules` names a payee outside its target, so that a run
+    /// over them has to know which payees exist.
+    pub fn needs_known_payees(rules: &[CategorizationRule]) -> bool {
+        rules
+            .iter()
+            .any(|r| r.payee_condition_id.is_some() || r.set_payee_id.is_some())
+    }
+
+    /// The payee the rules file the activity under: the target of the best
+    /// matching payee rule, or the payee the best matching category rule also
+    /// sets, whichever of them ranks first. `input.payee_id` is not read: no
+    /// rule that sets a payee can match on one.
+    pub fn planned_payee(&self, input: &RuleInput<'_>) -> Option<&'r str> {
+        let input = RuleInput {
+            payee_id: None,
+            ..*input
+        };
+        match_compiled(self.payee_setters.iter().copied(), &input)
+            .and_then(|m| m.rule.payee_to_set())
+    }
+
+    /// The rules of the category pass: every rule but the payee rules.
+    pub fn category_rules(&self) -> impl Iterator<Item = &'c CompiledRule<'r>> + '_ {
+        self.category_rules.iter().copied()
+    }
+}
+
+/// The payee an activity is filed under once a rule run has written its
+/// payees: what rules with a payee condition are matched against.
+///
+/// The run leaves a payee the user set alone, and in the only-uncategorized
+/// mode any payee the activity already has, so those stand. Otherwise the
+/// payee this run's rules set (`planned`) takes its place, and without one the
+/// existing payee stays.
+pub fn effective_payee<'a>(
+    assignments: &'a [crate::activity_assignments::ActivityTaxonomyAssignment],
+    planned: Option<&'a str>,
+    only_uncategorized: bool,
+) -> Option<&'a str> {
+    let mut existing = assignments
+        .iter()
+        .filter(|a| a.taxonomy_id == crate::activity_assignments::PAYEES_TAXONOMY);
+    let manual = existing
+        .clone()
+        .find(|a| a.source.eq_ignore_ascii_case("manual"));
+    let kept = manual.or_else(|| existing.next());
+    match (kept, planned) {
+        (Some(kept), Some(planned)) => {
+            if manual.is_some() || only_uncategorized {
+                Some(kept.category_id.as_str())
+            } else {
+                Some(planned)
+            }
+        }
+        (Some(kept), None) => Some(kept.category_id.as_str()),
+        (None, planned) => planned,
+    }
+}
+
+/// Single-shot match against an un-compiled rule slice, for an activity
+/// without a payee. Convenience for the rule-tester / single-activity paths
+/// where the per-call compile cost is negligible. Bulk paths should use
+/// [`compile_rules`] + [`match_compiled`].
 pub fn match_rules<'r>(
     rules: &'r [CategorizationRule],
     notes: &str,
@@ -170,11 +313,14 @@ pub fn match_rules<'r>(
     let notes_upper = notes.to_uppercase();
     match_compiled(
         &compiled,
-        &notes_upper,
-        notes,
-        activity_type,
-        account_id,
-        amount.map(|d| d.abs()),
+        &RuleInput {
+            notes_upper: &notes_upper,
+            notes_raw: notes,
+            activity_type,
+            account_id,
+            amount: amount.map(|d| d.abs()),
+            payee_id: None,
+        },
     )
 }
 
@@ -195,6 +341,8 @@ mod tests {
             amount_op: None,
             amount_value: None,
             amount_value2: None,
+            payee_condition_id: None,
+            set_payee_id: None,
             priority: prio,
             is_global: true,
             account_id: None,
@@ -223,6 +371,200 @@ mod tests {
 
     fn dec(s: &str) -> Option<Decimal> {
         Some(s.parse().unwrap())
+    }
+
+    fn input<'a>(
+        notes_upper: &'a str,
+        notes_raw: &'a str,
+        payee: Option<&'a str>,
+    ) -> RuleInput<'a> {
+        RuleInput {
+            notes_upper,
+            notes_raw,
+            activity_type: "WITHDRAWAL",
+            account_id: "acct1",
+            amount: None,
+            payee_id: payee,
+        }
+    }
+
+    fn payee_rule(name: &str, payee: &str, prio: i32) -> CategorizationRule {
+        let mut r = rule(
+            name,
+            crate::categorization_rules::model::NO_TEXT_CONDITION_PATTERN,
+            RuleMatchType::Regex,
+            prio,
+        );
+        r.payee_condition_id = Some(payee.to_string());
+        r
+    }
+
+    fn matched(rules: &[CategorizationRule], notes: &str, payee: Option<&str>) -> Option<String> {
+        let compiled = compile_rules(rules);
+        let upper = notes.to_uppercase();
+        match_compiled(&compiled, &input(&upper, notes, payee)).map(|m| m.rule.id.clone())
+    }
+
+    #[test]
+    fn the_no_text_placeholder_is_not_a_regex_an_older_version_can_compile() {
+        // An older version compiles the stored pattern as a regex and, when
+        // that fails, never matches the rule. It must keep failing.
+        assert!(compile_regex_pattern(
+            crate::categorization_rules::model::NO_TEXT_CONDITION_PATTERN
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_payee_only_rule_never_matches_a_matcher_that_ignores_its_payee_condition() {
+        // What an older version sees of a payee-only rule: a regex rule whose
+        // pattern does not compile. Stored as `contains ""` it would match
+        // every activity there.
+        let mut as_older_version_sees_it = payee_rule("payee-only", "payee-amazon", 0);
+        as_older_version_sees_it.payee_condition_id = None;
+        assert_eq!(
+            matched(&[as_older_version_sees_it], "ANYTHING AT ALL", None),
+            None
+        );
+    }
+
+    #[test]
+    fn a_payee_only_rule_matches_its_payee_whatever_the_text() {
+        let rules = vec![payee_rule("amazon", "payee-amazon", 0)];
+        assert_eq!(
+            matched(&rules, "whatever", Some("payee-amazon")),
+            Some("amazon".to_string())
+        );
+        assert_eq!(
+            matched(&rules, "", Some("payee-amazon")),
+            Some("amazon".to_string())
+        );
+        assert_eq!(matched(&rules, "whatever", Some("payee-other")), None);
+        assert_eq!(matched(&rules, "whatever", None), None);
+    }
+
+    #[test]
+    fn a_payee_condition_is_anded_with_the_text_condition() {
+        let mut r = rule("both", "PRIME", RuleMatchType::Contains, 0);
+        r.payee_condition_id = Some("payee-amazon".to_string());
+        let rules = vec![r];
+        assert_eq!(
+            matched(&rules, "prime video", Some("payee-amazon")),
+            Some("both".to_string())
+        );
+        assert_eq!(matched(&rules, "books", Some("payee-amazon")), None);
+        assert_eq!(matched(&rules, "prime video", Some("payee-other")), None);
+        assert_eq!(matched(&rules, "prime video", None), None);
+    }
+
+    #[test]
+    fn a_rule_with_no_condition_never_matches() {
+        // Neither text nor payee: an empty pattern is not "everything".
+        for (pattern, mt) in [
+            ("", RuleMatchType::Contains),
+            ("   ", RuleMatchType::StartsWith),
+            ("", RuleMatchType::Exact),
+            (
+                crate::categorization_rules::model::NO_TEXT_CONDITION_PATTERN,
+                RuleMatchType::Regex,
+            ),
+        ] {
+            let rules = vec![rule("empty", pattern, mt, 0)];
+            assert_eq!(matched(&rules, "anything", Some("payee-amazon")), None);
+            assert_eq!(matched(&rules, "", None), None);
+        }
+    }
+
+    #[test]
+    fn an_empty_pattern_beside_a_payee_condition_is_no_text_condition() {
+        let mut r = rule("payee", "", RuleMatchType::Exact, 0);
+        r.payee_condition_id = Some("payee-amazon".to_string());
+        assert_eq!(
+            matched(&[r], "not empty", Some("payee-amazon")),
+            Some("payee".to_string())
+        );
+    }
+
+    #[test]
+    fn equal_priority_prefers_the_more_specific_rule() {
+        let mut contains = rule("contains", "FOO", RuleMatchType::Contains, 1);
+        let mut regex = rule("regex", "(?i)foo", RuleMatchType::Regex, 1);
+        let mut starts = rule("starts", "FOO", RuleMatchType::StartsWith, 1);
+        let mut exact = rule("exact", "FOO", RuleMatchType::Exact, 1);
+        let mut payee = payee_rule("payee", "payee-foo", 1);
+        // Listed least specific first, as the oldest rules would be.
+        let base = Utc::now().naive_utc();
+        for (i, r) in [
+            &mut contains,
+            &mut regex,
+            &mut starts,
+            &mut exact,
+            &mut payee,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            r.created_at = base + chrono::Duration::seconds(i as i64);
+        }
+
+        let all = vec![
+            contains.clone(),
+            regex.clone(),
+            starts.clone(),
+            exact.clone(),
+            payee,
+        ];
+        assert_eq!(
+            matched(&all, "foo", Some("payee-foo")),
+            Some("payee".to_string())
+        );
+        assert_eq!(matched(&all, "foo", None), Some("exact".to_string()));
+        assert_eq!(matched(&all, "foo bar", None), Some("starts".to_string()));
+        // A fragment and a regex are equally specific: the first listed wins.
+        assert_eq!(matched(&all, "a foo", None), Some("contains".to_string()));
+        assert_eq!(
+            matched(&[regex.clone(), contains.clone()], "a foo", None),
+            Some("regex".to_string())
+        );
+        // Priority still comes first.
+        contains.priority = 2;
+        assert_eq!(
+            matched(&[contains, exact], "foo", None),
+            Some("contains".to_string())
+        );
+    }
+
+    fn payee_assignment(
+        payee: &str,
+        source: &str,
+    ) -> crate::activity_assignments::ActivityTaxonomyAssignment {
+        crate::activity_assignments::ActivityTaxonomyAssignment {
+            id: format!("assignment-{payee}"),
+            activity_id: "activity".to_string(),
+            taxonomy_id: crate::activity_assignments::PAYEES_TAXONOMY.to_string(),
+            category_id: payee.to_string(),
+            weight: 10_000,
+            source: source.to_string(),
+            created_at: Utc::now().naive_utc(),
+            updated_at: Utc::now().naive_utc(),
+        }
+    }
+
+    #[test]
+    fn the_effective_payee_is_the_one_the_run_leaves_on_the_activity() {
+        let none = [];
+        let manual = [payee_assignment("manual", "manual")];
+        let by_rule = [payee_assignment("old", "rule")];
+
+        assert_eq!(effective_payee(&none, None, true), None);
+        assert_eq!(effective_payee(&none, Some("new"), true), Some("new"));
+        // A manual payee is never replaced.
+        assert_eq!(effective_payee(&manual, Some("new"), true), Some("manual"));
+        assert_eq!(effective_payee(&manual, Some("new"), false), Some("manual"));
+        // A payee a rule set is replaced only when the run overwrites.
+        assert_eq!(effective_payee(&by_rule, Some("new"), true), Some("old"));
+        assert_eq!(effective_payee(&by_rule, Some("new"), false), Some("new"));
+        assert_eq!(effective_payee(&by_rule, None, false), Some("old"));
     }
 
     #[test]
@@ -260,9 +602,9 @@ mod tests {
         ];
         let compiled = compile_rules(&rules);
 
-        let m = match_compiled(&compiled, "FOO X", "FOO X", "WITHDRAWAL", "acct1", None).unwrap();
+        let m = match_compiled(&compiled, &input("FOO X", "FOO X", None)).unwrap();
         assert_eq!(m.rule.id, "a");
-        let m = match_compiled(&compiled, "BARABC", "barabc", "WITHDRAWAL", "acct1", None).unwrap();
+        let m = match_compiled(&compiled, &input("BARABC", "barabc", None)).unwrap();
         assert_eq!(m.rule.id, "re");
     }
 
@@ -278,14 +620,7 @@ mod tests {
     fn invalid_regex_never_matches_but_doesnt_crash() {
         let rules = vec![rule("bad", "(unclosed", RuleMatchType::Regex, 5)];
         let compiled = compile_rules(&rules);
-        let m = match_compiled(
-            &compiled,
-            "ANYTHING",
-            "anything",
-            "WITHDRAWAL",
-            "acct1",
-            None,
-        );
+        let m = match_compiled(&compiled, &input("ANYTHING", "anything", None));
         assert!(m.is_none());
     }
 

@@ -274,7 +274,8 @@ pub struct SpendingContext {
 pub struct PayeeReferences {
     /// Activities filed under the payee.
     pub transactions: usize,
-    /// Categorization rules that set the payee.
+    /// Categorization rules that set the payee, as their target or beside a
+    /// category, or that match on it.
     pub rules: usize,
 }
 

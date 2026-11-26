@@ -537,6 +537,8 @@ fn preset_rule_inputs() -> Vec<NewCategorizationRule> {
         amount_op: None,
         amount_value: None,
         amount_value2: None,
+        payee_condition_id: None,
+        set_payee_id: None,
         priority: 0,
         is_global: true,
         account_id: None,
@@ -1637,6 +1639,8 @@ async fn payee_created_filed_renamed_and_deleted_reaches_peer() {
             amount_op: None,
             amount_value: None,
             amount_value2: None,
+            payee_condition_id: None,
+            set_payee_id: None,
             priority: 0,
             is_global: true,
             account_id: None,
@@ -1702,4 +1706,316 @@ async fn payee_created_filed_renamed_and_deleted_reaches_peer() {
         vec![(SPENDING.to_string(), "cat_groceries".to_string())],
         "the category stays when the payee goes"
     );
+}
+
+/// (payee_condition_id, set_payee_id, match_type, pattern, name) of one rule.
+type RulePayeeRow = (Option<String>, Option<String>, String, String, String);
+
+fn rule_payee_row(d: &Device, rule_id: &str) -> Option<RulePayeeRow> {
+    spending_categorization_rules::table
+        .find(rule_id)
+        .select((
+            spending_categorization_rules::payee_condition_id,
+            spending_categorization_rules::set_payee_id,
+            spending_categorization_rules::match_type,
+            spending_categorization_rules::pattern,
+            spending_categorization_rules::name,
+        ))
+        .first(&mut d.conn())
+        .optional()
+        .expect("load the rule")
+}
+
+/// The payloads A has queued for one rule, oldest first.
+fn pending_rule_payloads(d: &Device, rule_id: &str) -> Vec<serde_json::Value> {
+    d.sync
+        .list_pending_outbox(10_000)
+        .expect("list the pending outbox")
+        .into_iter()
+        .filter(|event| {
+            event.entity == SyncEntity::SpendingCategorizationRule && event.entity_id == rule_id
+        })
+        .map(|event| serde_json::from_str(&event.payload).expect("outbox payload is JSON"))
+        .collect()
+}
+
+/// A rule's payee condition and "also set payee" reach the peer, a clear of
+/// either reaches it too, and a rule that uses neither names neither in its
+/// payload: a version without the columns rejects a payload that names them.
+#[tokio::test]
+async fn rule_payee_fields_reach_peer_and_plain_rules_stay_readable_by_older_versions() {
+    use wealthfolio_core::taxonomies::{NewCategory, TaxonomyRepositoryTrait};
+    use wealthfolio_spending::categorization_rules::{
+        UpdateCategorizationRule, NO_TEXT_CONDITION_PATTERN,
+    };
+    use wealthfolio_storage_sqlite::taxonomies::TaxonomyRepository;
+
+    let (a, b) = (Device::new(), Device::new());
+    seed_both(&a, &b, &cash_activity_seed());
+    let taxonomy = TaxonomyRepository::new(a.pool.clone(), a.writer.clone());
+    let rules = CategorizationRulesRepository::new(a.pool.clone(), a.writer.clone());
+    let mut seq = 0;
+
+    let payee = taxonomy
+        .create_category(NewCategory {
+            taxonomy_id: PAYEES.to_string(),
+            name: "Corner Bakery".to_string(),
+            key: "payee_corner_bakery".to_string(),
+            color: "#5B7C99".to_string(),
+            ..Default::default()
+        })
+        .await
+        .expect("create the payee on A");
+    let new_rule = |id: &str, pattern: &str, match_type: RuleMatchType| NewCategorizationRule {
+        id: Some(id.to_string()),
+        name: id.to_string(),
+        pattern: pattern.to_string(),
+        match_type,
+        taxonomy_id: Some(SPENDING.to_string()),
+        category_id: Some("cat_groceries".to_string()),
+        activity_type: None,
+        amount_op: None,
+        amount_value: None,
+        amount_value2: None,
+        payee_condition_id: None,
+        set_payee_id: None,
+        priority: 0,
+        is_global: true,
+        account_id: None,
+        preset_id: None,
+        preset_rule_key: None,
+        preset_version: None,
+    };
+
+    // A payee-only rule, stored as the service stores it, a rule that also
+    // sets a payee, and a rule that uses neither column.
+    rules
+        .create(NewCategorizationRule {
+            payee_condition_id: Some(payee.id.clone()),
+            ..new_rule(
+                "rule-by-payee",
+                NO_TEXT_CONDITION_PATTERN,
+                RuleMatchType::Regex,
+            )
+        })
+        .await
+        .expect("create the payee-only rule on A");
+    rules
+        .create(NewCategorizationRule {
+            set_payee_id: Some(payee.id.clone()),
+            ..new_rule("rule-sets-payee", "BAKERY", RuleMatchType::Contains)
+        })
+        .await
+        .expect("create the payee-setting rule on A");
+    rules
+        .create(new_rule("rule-plain", "GROCER", RuleMatchType::Contains))
+        .await
+        .expect("create the plain rule on A");
+
+    let plain = pending_rule_payloads(&a, "rule-plain");
+    assert_eq!(plain.len(), 1);
+    assert!(
+        plain[0].get("payee_condition_id").is_none() && plain[0].get("set_payee_id").is_none(),
+        "a rule that uses neither payee column must not name them: {}",
+        plain[0]
+    );
+
+    let created = sync_cycle(&a, &b, &mut seq).await;
+    created.assert_all_applied();
+    assert_eq!(
+        rule_payee_row(&b, "rule-by-payee"),
+        Some((
+            Some(payee.id.clone()),
+            None,
+            "regex".to_string(),
+            NO_TEXT_CONDITION_PATTERN.to_string(),
+            "rule-by-payee".to_string(),
+        ))
+    );
+    assert_eq!(
+        rule_payee_row(&b, "rule-sets-payee").map(|row| row.1),
+        Some(Some(payee.id.clone()))
+    );
+
+    // An edit that leaves the payee fields alone still does not name them...
+    rules
+        .update(
+            "rule-plain",
+            UpdateCategorizationRule {
+                name: Some("renamed".to_string()),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("rename the plain rule on A");
+    let renamed = pending_rule_payloads(&a, "rule-plain");
+    assert!(renamed[0].get("payee_condition_id").is_none());
+    // ...and one that clears them says so, or the peer would keep its value.
+    rules
+        .update(
+            "rule-by-payee",
+            UpdateCategorizationRule {
+                pattern: Some("BAKERY".to_string()),
+                match_type: Some(RuleMatchType::Contains),
+                payee_condition_id: Some(None),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("replace the payee condition by a text condition on A");
+    rules
+        .update(
+            "rule-sets-payee",
+            UpdateCategorizationRule {
+                set_payee_id: Some(None),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("clear the payee the rule sets on A");
+    let cleared = pending_rule_payloads(&a, "rule-by-payee");
+    assert_eq!(
+        cleared[0].get("payee_condition_id"),
+        Some(&serde_json::Value::Null)
+    );
+
+    let updated = sync_cycle(&a, &b, &mut seq).await;
+    updated.assert_all_applied();
+    assert_eq!(
+        rule_payee_row(&b, "rule-by-payee"),
+        Some((
+            None,
+            None,
+            "contains".to_string(),
+            "BAKERY".to_string(),
+            "rule-by-payee".to_string(),
+        ))
+    );
+    assert_eq!(
+        rule_payee_row(&b, "rule-sets-payee").map(|row| row.1),
+        Some(None)
+    );
+}
+
+/// A version without the payee columns saves a rule back without them. Its
+/// payload must not clear the payee condition here: the rule would go from
+/// "only this payee" to whatever its text matches.
+#[tokio::test]
+async fn an_older_versions_resave_of_a_rule_keeps_its_payee_fields() {
+    let b = Device::new();
+    b.seed(
+        "INSERT INTO taxonomy_categories (id, taxonomy_id, name, key, color, sort_order) \
+         VALUES ('payee-bakery', 'payees', 'Corner Bakery', 'payee_corner_bakery', '#5B7C99', 0);",
+    );
+    let created = replay(
+        &b,
+        remote_event(
+            SyncEntity::SpendingCategorizationRule,
+            "rule-by-payee",
+            SyncOperation::Create,
+            "evt-create",
+            "2026-11-26T10:00:00Z",
+            1,
+            json!({
+                "id": "rule-by-payee",
+                "name": "Bakery",
+                "pattern": "BAKERY",
+                "matchType": "contains",
+                "taxonomyId": SPENDING,
+                "categoryId": "cat_groceries",
+                "activityType": null,
+                "priority": 0,
+                "isGlobal": 1,
+                "accountId": null,
+                "presetId": null,
+                "presetRuleKey": null,
+                "presetVersion": null,
+                "presetModified": 0,
+                "createdAt": "2026-11-26T10:00:00Z",
+                "updatedAt": "2026-11-26T10:00:00Z",
+                "payeeConditionId": "payee-bakery",
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(created, 1);
+
+    // The same rule as a version without the columns serializes it: every
+    // column it knows, and nothing about payees.
+    let resaved = replay(
+        &b,
+        remote_event(
+            SyncEntity::SpendingCategorizationRule,
+            "rule-by-payee",
+            SyncOperation::Update,
+            "evt-older-resave",
+            "2026-11-26T11:00:00Z",
+            2,
+            json!({
+                "id": "rule-by-payee",
+                "name": "Bakery (renamed on an older version)",
+                "pattern": "BAKERY",
+                "matchType": "contains",
+                "taxonomyId": SPENDING,
+                "categoryId": "cat_groceries",
+                "activityType": null,
+                "priority": 5,
+                "isGlobal": 1,
+                "accountId": null,
+                "presetId": null,
+                "presetRuleKey": null,
+                "presetVersion": null,
+                "presetModified": 0,
+                "createdAt": "2026-11-26T10:00:00Z",
+                "updatedAt": "2026-11-26T11:00:00Z",
+            }),
+        ),
+    )
+    .await;
+    assert_eq!(resaved, 1, "the older version's edit itself applies");
+    assert_eq!(
+        rule_payee_row(&b, "rule-by-payee"),
+        Some((
+            Some("payee-bakery".to_string()),
+            None,
+            "contains".to_string(),
+            "BAKERY".to_string(),
+            "Bakery (renamed on an older version)".to_string(),
+        )),
+        "the rename applies and the payee condition stays"
+    );
+}
+
+/// What a version without the payee columns does with a rule that names
+/// them: it rejects the whole event (the sync engine then dead-letters it), so
+/// it never holds such a rule with its payee condition stripped. Shown here
+/// with a column this version does not have.
+#[tokio::test]
+async fn a_rule_payload_naming_an_unknown_column_is_rejected_whole() {
+    let b = Device::new();
+    let outcome = b
+        .sync
+        .apply_remote_events_lww_batch(vec![remote_event(
+            SyncEntity::SpendingCategorizationRule,
+            "rule-from-the-future",
+            SyncOperation::Create,
+            "evt-future",
+            "2026-11-26T10:00:00Z",
+            1,
+            json!({
+                "id": "rule-from-the-future",
+                "name": "Future",
+                "pattern": "",
+                "matchType": "contains",
+                "priority": 0,
+                "isGlobal": 1,
+                "presetModified": 0,
+                "createdAt": "2026-11-26T10:00:00Z",
+                "updatedAt": "2026-11-26T10:00:00Z",
+                "aColumnOfALaterVersion": "x",
+            }),
+        )])
+        .await;
+    assert!(outcome.is_err(), "an unknown column must fail the event");
+    assert_eq!(rule_payee_row(&b, "rule-from-the-future"), None);
 }

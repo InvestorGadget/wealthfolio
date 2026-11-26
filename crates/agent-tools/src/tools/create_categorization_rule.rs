@@ -227,6 +227,8 @@ impl CreateCategorizationRule {
             amount_op: None,
             amount_value: None,
             amount_value2: None,
+            payee_condition_id: None,
+            set_payee_id: None,
             priority: 0,
             is_global: account_id.is_none(),
             account_id,

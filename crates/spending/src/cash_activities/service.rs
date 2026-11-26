@@ -174,6 +174,16 @@ impl CashActivityService {
         Ok(usage)
     }
 
+    /// The ids of the payees that exist.
+    pub fn payee_ids(&self) -> Result<std::collections::HashSet<String>> {
+        Ok(self
+            .taxonomy_service
+            .get_taxonomy(PAYEES_TAXONOMY)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+            .map(|entry| entry.categories.into_iter().map(|c| c.id).collect())
+            .unwrap_or_default())
+    }
+
     /// What still points at a payee. Unlike [`Self::payee_usage`] it counts
     /// the activities of every account, in Spending or not: it is the count
     /// the payee's delete is refused for.

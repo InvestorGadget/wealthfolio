@@ -50,6 +50,13 @@ pub struct CategorizationRuleDB {
     pub amount_value: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub amount_value2: Option<String>,
+    // Left out of a sync payload when unset, like the amount columns: a peer
+    // on a version without these columns rejects a payload that names them,
+    // so a rule that does not use them must not name them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payee_condition_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_payee_id: Option<String>,
 }
 
 #[derive(Insertable, AsChangeset, Serialize, Deserialize, Debug, Clone)]
@@ -74,6 +81,8 @@ pub struct NewCategorizationRuleDB {
     pub amount_op: Option<String>,
     pub amount_value: Option<String>,
     pub amount_value2: Option<String>,
+    pub payee_condition_id: Option<String>,
+    pub set_payee_id: Option<String>,
 }
 
 #[derive(Queryable, Selectable, Insertable, Serialize, Deserialize, Debug, Clone)]
@@ -167,6 +176,8 @@ impl From<CategorizationRuleDB> for CategorizationRule {
             amount_op,
             amount_value: parse_db_decimal(&db.amount_value, &db.id, "amount_value"),
             amount_value2: parse_db_decimal(&db.amount_value2, &db.id, "amount_value2"),
+            payee_condition_id: db.payee_condition_id,
+            set_payee_id: db.set_payee_id,
             id: db.id,
             name: db.name,
             pattern: db.pattern,
@@ -248,6 +259,25 @@ impl CategorizationRulesRepository {
                 if let Some(v) = patch.amount_value2 {
                     existing.amount_value2 = v.map(|d| d.to_string());
                 }
+                // The rule form sends both payee fields with every save, set
+                // or not. Only a real change is spelled out in the payload:
+                // naming the columns on every edit would make every edited
+                // rule unreadable to versions without them.
+                let previous_payee_fields = (
+                    existing.payee_condition_id.clone(),
+                    existing.set_payee_id.clone(),
+                );
+                if let Some(v) = patch.payee_condition_id {
+                    existing.payee_condition_id = v;
+                }
+                if let Some(v) = patch.set_payee_id {
+                    existing.set_payee_id = v;
+                }
+                let payee_fields_changed = previous_payee_fields
+                    != (
+                        existing.payee_condition_id.clone(),
+                        existing.set_payee_id.clone(),
+                    );
                 if let Some(v) = patch.priority {
                     existing.priority = v;
                 }
@@ -275,6 +305,9 @@ impl CategorizationRulesRepository {
                         spending_categorization_rules::amount_op.eq(&existing.amount_op),
                         spending_categorization_rules::amount_value.eq(&existing.amount_value),
                         spending_categorization_rules::amount_value2.eq(&existing.amount_value2),
+                        spending_categorization_rules::payee_condition_id
+                            .eq(&existing.payee_condition_id),
+                        spending_categorization_rules::set_payee_id.eq(&existing.set_payee_id),
                         spending_categorization_rules::priority.eq(existing.priority),
                         spending_categorization_rules::is_global.eq(existing.is_global),
                         spending_categorization_rules::account_id.eq(&existing.account_id),
@@ -284,10 +317,12 @@ impl CategorizationRulesRepository {
                     .execute(tx.conn())
                     .map_err(StorageError::from)?;
 
-                if amount_fields_changed {
-                    tx.queue_outbox(outbox_request_with_explicit_amount_fields(
+                if amount_fields_changed || payee_fields_changed {
+                    tx.queue_outbox(outbox_request_with_explicit_fields(
                         &existing,
                         SyncOperation::Update,
+                        amount_fields_changed,
+                        payee_fields_changed,
                     )?);
                 } else {
                     tx.update(&existing)?;
@@ -369,6 +404,8 @@ fn new_rule_db(new_rule: NewCategorizationRule, now: &str) -> NewCategorizationR
         amount_op,
         amount_value,
         amount_value2,
+        payee_condition_id,
+        set_payee_id,
         priority,
         is_global,
         account_id,
@@ -405,27 +442,48 @@ fn new_rule_db(new_rule: NewCategorizationRule, now: &str) -> NewCategorizationR
         amount_op: amount_op.map(|op| op.as_str().to_string()),
         amount_value: amount_value.map(|d| d.to_string()),
         amount_value2: amount_value2.map(|d| d.to_string()),
+        payee_condition_id,
+        set_payee_id,
     }
 }
 
-fn outbox_request_with_explicit_amount_fields(
+/// The outbox request for a rule update. An unset optional column is left out
+/// of the payload, and a peer only writes the columns a payload names, so a
+/// group of columns that was just changed is named in full: clearing one has
+/// to reach the peers as an explicit null. A group that was not touched stays
+/// out, which keeps the payload readable by versions that lack its columns.
+fn outbox_request_with_explicit_fields(
     rule: &CategorizationRuleDB,
     op: SyncOperation,
+    amount_fields: bool,
+    payee_fields: bool,
 ) -> wealthfolio_core::errors::Result<OutboxWriteRequest> {
     let mut request = crate::sync::outbox_request_for_model(rule, op)?;
     if let Some(payload) = request.payload.as_object_mut() {
-        payload.insert(
-            "amountOp".to_string(),
-            serde_json::to_value(&rule.amount_op)?,
-        );
-        payload.insert(
-            "amountValue".to_string(),
-            serde_json::to_value(&rule.amount_value)?,
-        );
-        payload.insert(
-            "amountValue2".to_string(),
-            serde_json::to_value(&rule.amount_value2)?,
-        );
+        if amount_fields {
+            payload.insert(
+                "amountOp".to_string(),
+                serde_json::to_value(&rule.amount_op)?,
+            );
+            payload.insert(
+                "amountValue".to_string(),
+                serde_json::to_value(&rule.amount_value)?,
+            );
+            payload.insert(
+                "amountValue2".to_string(),
+                serde_json::to_value(&rule.amount_value2)?,
+            );
+        }
+        if payee_fields {
+            payload.insert(
+                "payeeConditionId".to_string(),
+                serde_json::to_value(&rule.payee_condition_id)?,
+            );
+            payload.insert(
+                "setPayeeId".to_string(),
+                serde_json::to_value(&rule.set_payee_id)?,
+            );
+        }
     }
     Ok(request)
 }
@@ -522,6 +580,10 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                             existing.amount_value.clone(),
                             existing.amount_value2.clone(),
                         );
+                        let previous_payee_fields = (
+                            existing.payee_condition_id.clone(),
+                            existing.set_payee_id.clone(),
+                        );
 
                         existing.name = new_rule.name;
                         existing.pattern = new_rule.pattern;
@@ -532,6 +594,8 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                         existing.amount_op = new_rule.amount_op.map(|op| op.as_str().to_string());
                         existing.amount_value = new_rule.amount_value.map(|d| d.to_string());
                         existing.amount_value2 = new_rule.amount_value2.map(|d| d.to_string());
+                        existing.payee_condition_id = new_rule.payee_condition_id;
+                        existing.set_payee_id = new_rule.set_payee_id;
                         existing.priority = new_rule.priority;
                         existing.is_global = if new_rule.is_global { 1 } else { 0 };
                         existing.account_id = new_rule.account_id;
@@ -553,6 +617,10 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                                     .eq(&existing.amount_value),
                                 spending_categorization_rules::amount_value2
                                     .eq(&existing.amount_value2),
+                                spending_categorization_rules::payee_condition_id
+                                    .eq(&existing.payee_condition_id),
+                                spending_categorization_rules::set_payee_id
+                                    .eq(&existing.set_payee_id),
                                 spending_categorization_rules::priority.eq(existing.priority),
                                 spending_categorization_rules::is_global.eq(existing.is_global),
                                 spending_categorization_rules::account_id.eq(&existing.account_id),
@@ -567,10 +635,17 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                                 existing.amount_value.clone(),
                                 existing.amount_value2.clone(),
                             );
-                        if amount_fields_changed {
-                            tx.queue_outbox(outbox_request_with_explicit_amount_fields(
+                        let payee_fields_changed = previous_payee_fields
+                            != (
+                                existing.payee_condition_id.clone(),
+                                existing.set_payee_id.clone(),
+                            );
+                        if amount_fields_changed || payee_fields_changed {
+                            tx.queue_outbox(outbox_request_with_explicit_fields(
                                 &existing,
                                 SyncOperation::Update,
+                                amount_fields_changed,
+                                payee_fields_changed,
                             )?);
                         } else {
                             tx.update(&existing)?;
@@ -690,9 +765,11 @@ impl CategorizationRulesRepositoryTrait for CategorizationRulesRepository {
                             .execute(tx.conn())
                             .map_err(StorageError::from)?;
                         if amount_fields_changed {
-                            tx.queue_outbox(outbox_request_with_explicit_amount_fields(
+                            tx.queue_outbox(outbox_request_with_explicit_fields(
                                 &existing,
                                 SyncOperation::Update,
+                                true,
+                                false,
                             )?);
                         } else {
                             tx.update(&existing)?;
@@ -875,6 +952,8 @@ mod tests {
             amount_op: None,
             amount_value: None,
             amount_value2: None,
+            payee_condition_id: None,
+            set_payee_id: None,
             priority: 0,
             is_global: true,
             account_id: None,
@@ -907,6 +986,20 @@ mod tests {
             .into_iter()
             .map(|payload| serde_json::from_str(&payload).expect("parse rule outbox payload"))
             .collect()
+    }
+
+    /// The one outbox payload of a rule that carries this rule name.
+    fn payload_named(
+        repo: &CategorizationRulesRepository,
+        rule_id: &str,
+        name: &str,
+    ) -> serde_json::Value {
+        let mut named: Vec<_> = rule_outbox_payloads(repo, rule_id)
+            .into_iter()
+            .filter(|payload| payload.get("name").and_then(|v| v.as_str()) == Some(name))
+            .collect();
+        assert_eq!(named.len(), 1, "one payload named {name}");
+        named.remove(0)
     }
 
     #[tokio::test]
@@ -1034,6 +1127,95 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn payee_fields_round_trip_and_update() {
+        let (repo, _dir) = setup_repo();
+        let mut new_rule = preset_rule();
+        new_rule.id = Some("rule-payee".to_string());
+        new_rule.preset_id = None;
+        new_rule.preset_rule_key = None;
+        new_rule.preset_version = None;
+        new_rule.payee_condition_id = Some("payee-1".to_string());
+
+        let created = repo.create(new_rule).await.expect("create rule");
+        assert_eq!(created.payee_condition_id.as_deref(), Some("payee-1"));
+        assert_eq!(created.set_payee_id, None);
+        let fetched = repo.get("rule-payee").await.expect("get").expect("some");
+        assert_eq!(fetched, created);
+
+        // A patch that omits the payee fields leaves them untouched.
+        let untouched = repo
+            .update(
+                "rule-payee",
+                UpdateCategorizationRule {
+                    name: Some("Renamed".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("rename rule");
+        assert_eq!(untouched.payee_condition_id.as_deref(), Some("payee-1"));
+        // The rename's payload names only the field in use, as the create did.
+        let renamed = payload_named(&repo, "rule-payee", "Renamed");
+        assert_eq!(
+            renamed.get("payee_condition_id").and_then(|v| v.as_str()),
+            Some("payee-1")
+        );
+        assert!(renamed.get("set_payee_id").is_none());
+
+        // Swap the condition for an "also set payee".
+        let swapped = repo
+            .update(
+                "rule-payee",
+                UpdateCategorizationRule {
+                    payee_condition_id: Some(None),
+                    set_payee_id: Some(Some("payee-2".to_string())),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("swap payee fields");
+        assert_eq!(swapped.payee_condition_id, None);
+        assert_eq!(swapped.set_payee_id.as_deref(), Some("payee-2"));
+
+        let payloads = rule_outbox_payloads(&repo, "rule-payee");
+        assert_eq!(payloads.len(), 3);
+        // Create: only the field in use is named.
+        let created_payload = payload_named(&repo, "rule-payee", "Groceries");
+        assert_eq!(
+            created_payload
+                .get("payee_condition_id")
+                .and_then(|v| v.as_str()),
+            Some("payee-1")
+        );
+        assert!(created_payload.get("set_payee_id").is_none());
+        // The swap names both, the cleared one as an explicit null.
+        assert!(payloads.iter().any(|payload| {
+            payload.get("payee_condition_id") == Some(&serde_json::Value::Null)
+                && payload.get("set_payee_id").and_then(|v| v.as_str()) == Some("payee-2")
+        }));
+    }
+
+    #[tokio::test]
+    async fn upsert_replaces_the_payee_fields_with_the_rest_of_the_rule() {
+        let (repo, _dir) = setup_repo();
+        let mut rule = preset_rule();
+        rule.id = Some("addon:test:payee".to_string());
+        rule.preset_id = None;
+        rule.preset_rule_key = None;
+        rule.preset_version = None;
+        rule.set_payee_id = Some("payee-1".to_string());
+        repo.upsert(rule.clone()).await.expect("create");
+
+        rule.set_payee_id = None;
+        let replaced = repo.upsert(rule).await.expect("replace");
+        assert_eq!(replaced.set_payee_id, None);
+        let payloads = rule_outbox_payloads(&repo, "addon:test:payee");
+        assert!(payloads
+            .iter()
+            .any(|payload| payload.get("set_payee_id") == Some(&serde_json::Value::Null)));
+    }
+
+    #[tokio::test]
     async fn rule_without_amount_condition_omits_amount_fields_from_outbox() {
         let (repo, _dir) = setup_repo();
         let created = repo.create(preset_rule()).await.expect("create rule");
@@ -1057,7 +1239,26 @@ mod tests {
             assert!(payload.get("amount_op").is_none());
             assert!(payload.get("amount_value").is_none());
             assert!(payload.get("amount_value2").is_none());
+            assert!(payload.get("payee_condition_id").is_none());
+            assert!(payload.get("set_payee_id").is_none());
         }
+
+        // The rule form sends the payee fields with every save, as nulls when
+        // unset. That is no change, and must not put them in the payload.
+        repo.update(
+            "rule-ca-groceries",
+            UpdateCategorizationRule {
+                name: Some("Renamed again".to_string()),
+                payee_condition_id: Some(None),
+                set_payee_id: Some(None),
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("update rule");
+        let last = payload_named(&repo, "rule-ca-groceries", "Renamed again");
+        assert!(last.get("payee_condition_id").is_none());
+        assert!(last.get("set_payee_id").is_none());
     }
 
     #[tokio::test]
@@ -1075,6 +1276,8 @@ mod tests {
             amount_op: None,
             amount_value: None,
             amount_value2: None,
+            payee_condition_id: None,
+            set_payee_id: None,
             priority: 0,
             is_global: true,
             account_id: None,

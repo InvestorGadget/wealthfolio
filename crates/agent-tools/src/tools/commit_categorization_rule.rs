@@ -238,6 +238,8 @@ mod tests {
             amount_op: None,
             amount_value: None,
             amount_value2: None,
+            payee_condition_id: None,
+            set_payee_id: None,
             priority: 0,
             is_global: true,
             account_id: None,

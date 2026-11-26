@@ -8,17 +8,18 @@ use tokio::sync::Mutex;
 use rust_decimal::Decimal;
 
 use super::matcher::{
-    compile_regex_pattern, compile_rules, match_compiled, match_compiled_for_taxonomy,
-    MAX_REGEX_PATTERN_LEN,
+    compile_regex_pattern, compile_rules, effective_payee, match_compiled,
+    match_compiled_for_taxonomy, RuleInput, RulePasses, MAX_REGEX_PATTERN_LEN,
 };
 use super::model::{
-    CategorizationRule, NewCategorizationRule, RuleAmountOp, RuleMatchType,
-    UpdateCategorizationRule,
+    is_text_condition, CategorizationRule, NewCategorizationRule, RuleAmountOp, RuleMatchType,
+    UpdateCategorizationRule, NO_TEXT_CONDITION_PATTERN,
 };
 use super::presets::{self, ImportPresetResult, RemovePresetResult, RulePresetSummary};
 use super::traits::CategorizationRulesRepositoryTrait;
 use crate::activity_assignments::{
-    ActivityTaxonomyAssignmentService, NewActivityTaxonomyAssignment, PAYEES_TAXONOMY,
+    is_category_taxonomy, ActivityTaxonomyAssignmentService, NewActivityTaxonomyAssignment,
+    PAYEES_TAXONOMY,
 };
 use crate::error::SpendingError;
 
@@ -53,7 +54,9 @@ impl CategorizationRulesService {
     }
     pub async fn create(&self, mut new_rule: NewCategorizationRule) -> Result<CategorizationRule> {
         validate_rule_scope(new_rule.is_global, new_rule.account_id.as_deref())?;
-        validate_rule_pattern(&new_rule.match_type, &new_rule.pattern)?;
+        normalize_new_rule_conditions(&mut new_rule)?;
+        self.ensure_payees_exist([&new_rule.payee_condition_id, &new_rule.set_payee_id])
+            .await?;
         // Normalize before validating: values without an operator are dropped,
         // and only `between` keeps an upper value.
         if new_rule.amount_op.is_none() {
@@ -89,12 +92,65 @@ impl CategorizationRulesService {
             None => existing.account_id.clone(),
         };
         validate_rule_scope(new_global, new_account.as_deref())?;
+        // Resolve the post-patch conditions and payee fields, and validate
+        // them together: which of them a rule may combine depends on its
+        // target, and a rule left with no text condition is stored with the
+        // placeholder pattern.
+        for value in [&mut patch.payee_condition_id, &mut patch.set_payee_id]
+            .into_iter()
+            .flatten()
+        {
+            *value = non_blank(value.take());
+        }
         let new_match_type = patch.match_type.unwrap_or(existing.match_type);
         let new_pattern = patch
             .pattern
             .as_deref()
             .unwrap_or(existing.pattern.as_str());
-        validate_rule_pattern(&new_match_type, new_pattern)?;
+        let new_taxonomy = match &patch.taxonomy_id {
+            Some(value) => value.as_deref(),
+            None => existing.taxonomy_id.as_deref(),
+        };
+        let new_category = match &patch.category_id {
+            Some(value) => value.as_deref(),
+            None => existing.category_id.as_deref(),
+        };
+        let new_payee_condition = match &patch.payee_condition_id {
+            Some(value) => value.as_deref(),
+            None => existing.payee_condition_id.as_deref(),
+        };
+        let new_set_payee = match &patch.set_payee_id {
+            Some(value) => value.as_deref(),
+            None => existing.set_payee_id.as_deref(),
+        };
+        let (stored_match_type, stored_pattern) = resolve_rule_conditions(
+            new_match_type,
+            new_pattern,
+            new_taxonomy,
+            new_category,
+            new_payee_condition,
+            new_set_payee,
+        )?;
+        // Only a payee the patch newly names is looked up: a rule whose payee
+        // has since gone can still be edited, and matches nothing meanwhile.
+        let changed_payee = |patched: &Option<Option<String>>, stored: &Option<String>| {
+            patched
+                .as_ref()
+                .filter(|value| *value != stored)
+                .cloned()
+                .flatten()
+        };
+        self.ensure_payees_exist([
+            &changed_payee(&patch.payee_condition_id, &existing.payee_condition_id),
+            &changed_payee(&patch.set_payee_id, &existing.set_payee_id),
+        ])
+        .await?;
+        if stored_match_type != new_match_type {
+            patch.match_type = Some(stored_match_type);
+        }
+        if stored_pattern != new_pattern {
+            patch.pattern = Some(stored_pattern);
+        }
 
         // Resolve the post-patch amount condition, normalize it (clearing the
         // operator clears both values; only `between` keeps an upper value),
@@ -125,7 +181,7 @@ impl CategorizationRulesService {
     pub async fn update_reviewed(
         &self,
         expected: CategorizationRule,
-        proposed: NewCategorizationRule,
+        mut proposed: NewCategorizationRule,
     ) -> Result<CategorizationRule> {
         if proposed.id.as_deref() != Some(expected.id.as_str())
             || proposed.preset_id != expected.preset_id
@@ -138,7 +194,15 @@ impl CategorizationRulesService {
             .into());
         }
         validate_rule_scope(proposed.is_global, proposed.account_id.as_deref())?;
-        validate_rule_pattern(&proposed.match_type, &proposed.pattern)?;
+        normalize_new_rule_conditions(&mut proposed)?;
+        let changed_payee = |proposed: &Option<String>, stored: &Option<String>| {
+            proposed.clone().filter(|_| proposed != stored)
+        };
+        self.ensure_payees_exist([
+            &changed_payee(&proposed.payee_condition_id, &expected.payee_condition_id),
+            &changed_payee(&proposed.set_payee_id, &expected.set_payee_id),
+        ])
+        .await?;
         validate_rule_amount(
             proposed.amount_op,
             proposed.amount_value,
@@ -154,6 +218,8 @@ impl CategorizationRulesService {
             amount_op: Some(proposed.amount_op),
             amount_value: Some(proposed.amount_value),
             amount_value2: Some(proposed.amount_value2),
+            payee_condition_id: Some(proposed.payee_condition_id),
+            set_payee_id: Some(proposed.set_payee_id),
             priority: Some(proposed.priority),
             is_global: Some(proposed.is_global),
             account_id: Some(proposed.account_id),
@@ -171,7 +237,9 @@ impl CategorizationRulesService {
     /// including when the same id is submitted twice in quick succession.
     pub async fn upsert(&self, mut new_rule: NewCategorizationRule) -> Result<CategorizationRule> {
         validate_rule_scope(new_rule.is_global, new_rule.account_id.as_deref())?;
-        validate_rule_pattern(&new_rule.match_type, &new_rule.pattern)?;
+        normalize_new_rule_conditions(&mut new_rule)?;
+        self.ensure_payees_exist([&new_rule.payee_condition_id, &new_rule.set_payee_id])
+            .await?;
         if new_rule.amount_op.is_none() {
             new_rule.amount_value = None;
             new_rule.amount_value2 = None;
@@ -217,7 +285,8 @@ impl CategorizationRulesService {
             return Ok(Default::default());
         }
         let _guard = self.rerun_lock.lock().await;
-        let (matched, items, incompatible, without_target) = self.plan_rerun(account_ids).await?;
+        let (matched, items, incompatible, without_target) =
+            self.plan_rerun(account_ids, only_uncategorized).await?;
         let mut decisions = self
             .assignment_service
             .apply_rules_detailed(items, only_uncategorized)
@@ -234,7 +303,8 @@ impl CategorizationRulesService {
         if account_ids.is_empty() {
             return Ok(Default::default());
         }
-        let (matched, items, incompatible, without_target) = self.plan_rerun(account_ids).await?;
+        let (matched, items, incompatible, without_target) =
+            self.plan_rerun(account_ids, only_uncategorized).await?;
         let mut decisions = self
             .assignment_service
             .preview_rules(items, only_uncategorized)
@@ -244,19 +314,46 @@ impl CategorizationRulesService {
         Ok(super::model::CategorizationRunSummary { matched, decisions })
     }
 
+    /// Refuses a payee id that names no payee. The payee columns have no
+    /// foreign key (a deleted payee must not silently widen or retarget a
+    /// rule), so the service checks what it is given.
+    async fn ensure_payees_exist(&self, payee_ids: [&Option<String>; 2]) -> Result<()> {
+        let named: Vec<&String> = payee_ids.into_iter().flatten().collect();
+        if named.is_empty() {
+            return Ok(());
+        }
+        let known = self.cash_service.payee_ids().await?;
+        if named.into_iter().any(|id| !known.contains(id)) {
+            return Err(SpendingError::InvalidInput {
+                message: "Unknown payee".to_string(),
+            }
+            .into());
+        }
+        Ok(())
+    }
+
+    /// Match every activity against the rules, in two passes.
+    ///
+    /// The payee pass comes first: payee rules, and category rules that also
+    /// set a payee, give the activity its payee. The category pass then sees
+    /// the payee the activity ends up with (see [`effective_payee`]): the one
+    /// just planned, unless the writer will keep a payee the activity already
+    /// has. That is how one run chains "text → payee" into "payee → category".
     async fn plan_rerun(
         &self,
         account_ids: &[String],
+        only_uncategorized: bool,
     ) -> Result<(usize, Vec<NewActivityTaxonomyAssignment>, usize, usize)> {
         let activities = self.cash_service.list_for_rules(account_ids).await?;
 
         let rules = self.repo.list().await?;
-        // A payee sits beside the category instead of competing with it, so
-        // payee rules are matched in a pass of their own: one activity can
-        // take its category from one rule and its payee from another.
-        let (payee_rules, compiled): (Vec<_>, Vec<_>) = compile_rules(&rules)
-            .into_iter()
-            .partition(|c| c.rule.taxonomy_id.as_deref() == Some(PAYEES_TAXONOMY));
+        let known_payees = if RulePasses::needs_known_payees(&rules) {
+            Some(self.cash_service.payee_ids().await?)
+        } else {
+            None
+        };
+        let all_compiled = compile_rules(&rules);
+        let passes = RulePasses::new(&all_compiled, known_payees.as_ref());
 
         let mut matched_count = 0usize;
         let mut incompatible = 0;
@@ -266,45 +363,33 @@ impl CategorizationRulesService {
             let a = &row.activity;
             let notes_raw = a.notes.as_deref().unwrap_or("");
             let notes_upper = notes_raw.to_uppercase();
-            let payee_id = match_compiled(
-                &payee_rules,
-                &notes_upper,
+            let mut input = RuleInput {
+                notes_upper: &notes_upper,
                 notes_raw,
-                a.effective_type(),
-                &a.account_id,
-                a.amount.map(|d| d.abs()),
-            )
-            .and_then(|m| m.rule.category_id.clone());
-            let has_payee = payee_id.is_some();
-            if let Some(payee_id) = payee_id {
+                activity_type: a.effective_type(),
+                account_id: &a.account_id,
+                amount: a.amount.map(|d| d.abs()),
+                payee_id: None,
+            };
+            let planned_payee = passes.planned_payee(&input);
+            let has_payee = planned_payee.is_some();
+            if let Some(payee_id) = planned_payee {
                 writes.push(NewActivityTaxonomyAssignment {
                     id: None,
                     activity_id: a.id.clone(),
                     taxonomy_id: PAYEES_TAXONOMY.to_string(),
-                    category_id: payee_id,
+                    category_id: payee_id.to_string(),
                     weight: 10_000,
                     source: "rule".to_string(),
                 });
             }
+            input.payee_id = effective_payee(&row.assignments, planned_payee, only_uncategorized);
             let Some(m) = match_compiled_for_taxonomy(
-                &compiled,
+                passes.category_rules(),
                 row.cash_flow_bucket.taxonomy_id(),
-                &notes_upper,
-                notes_raw,
-                a.effective_type(),
-                &a.account_id,
-                a.amount.map(|d| d.abs()),
+                &input,
             ) else {
-                if match_compiled(
-                    &compiled,
-                    &notes_upper,
-                    notes_raw,
-                    a.effective_type(),
-                    &a.account_id,
-                    a.amount.map(|d| d.abs()),
-                )
-                .is_some()
-                {
+                if match_compiled(passes.category_rules(), &input).is_some() {
                     matched_count += 1;
                     // A mismatch only explains rows it leaves uncategorized; once
                     // the row has a category in its own taxonomy, it is settled.
@@ -426,6 +511,8 @@ impl CategorizationRulesService {
                 amount_op: None,
                 amount_value: None,
                 amount_value2: None,
+                payee_condition_id: None,
+                set_payee_id: None,
                 priority: rule.priority,
                 is_global: true,
                 account_id: None,
@@ -463,8 +550,85 @@ impl CategorizationRulesService {
 /// Pure native validation for previews and reviewed rule edits.
 pub fn validate_rule_input(rule: &NewCategorizationRule) -> Result<()> {
     validate_rule_scope(rule.is_global, rule.account_id.as_deref())?;
-    validate_rule_pattern(&rule.match_type, &rule.pattern)?;
+    resolve_rule_conditions(
+        rule.match_type,
+        &rule.pattern,
+        rule.taxonomy_id.as_deref(),
+        rule.category_id.as_deref(),
+        non_blank(rule.payee_condition_id.clone()).as_deref(),
+        non_blank(rule.set_payee_id.clone()).as_deref(),
+    )?;
     validate_rule_amount(rule.amount_op, rule.amount_value, rule.amount_value2)
+}
+
+fn non_blank(value: Option<String>) -> Option<String> {
+    value.filter(|v| !v.trim().is_empty())
+}
+
+/// Validate a whole new rule's conditions and payee fields, and give it the
+/// pattern it is stored with (see [`resolve_rule_conditions`]).
+fn normalize_new_rule_conditions(rule: &mut NewCategorizationRule) -> Result<()> {
+    rule.payee_condition_id = non_blank(rule.payee_condition_id.take());
+    rule.set_payee_id = non_blank(rule.set_payee_id.take());
+    let (match_type, pattern) = resolve_rule_conditions(
+        rule.match_type,
+        &rule.pattern,
+        rule.taxonomy_id.as_deref(),
+        rule.category_id.as_deref(),
+        rule.payee_condition_id.as_deref(),
+        rule.set_payee_id.as_deref(),
+    )?;
+    rule.match_type = match_type;
+    rule.pattern = pattern;
+    Ok(())
+}
+
+/// Validate what a rule matches on and which payee it may set, and return the
+/// `(match_type, pattern)` to store.
+///
+/// - A rule needs a text condition or a payee condition. With only a payee
+///   condition it is stored as a regex with [`NO_TEXT_CONDITION_PATTERN`], so
+///   a version that does not know payee conditions never matches it.
+/// - A rule that matches on a payee cannot set one: the payee pass runs
+///   before payees are known, so such a rule could never fire there.
+/// - Only a rule that targets a category can also set a payee; a payee rule
+///   already sets one as its target.
+fn resolve_rule_conditions(
+    match_type: RuleMatchType,
+    pattern: &str,
+    taxonomy_id: Option<&str>,
+    category_id: Option<&str>,
+    payee_condition_id: Option<&str>,
+    set_payee_id: Option<&str>,
+) -> Result<(RuleMatchType, String)> {
+    let invalid = |message: &str| -> anyhow::Error {
+        SpendingError::InvalidInput {
+            message: message.to_string(),
+        }
+        .into()
+    };
+    if payee_condition_id.is_some()
+        && (set_payee_id.is_some() || taxonomy_id == Some(PAYEES_TAXONOMY))
+    {
+        return Err(invalid("A rule with a payee condition cannot set a payee"));
+    }
+    if set_payee_id.is_some()
+        && !(category_id.is_some() && taxonomy_id.is_some_and(is_category_taxonomy))
+    {
+        return Err(invalid(
+            "Only a rule that sets a category can also set a payee",
+        ));
+    }
+    if is_text_condition(match_type, pattern) {
+        validate_rule_pattern(&match_type, pattern)?;
+        return Ok((match_type, pattern.to_string()));
+    }
+    if payee_condition_id.is_none() {
+        return Err(invalid(
+            "A rule needs a text condition or a payee condition",
+        ));
+    }
+    Ok((RuleMatchType::Regex, NO_TEXT_CONDITION_PATTERN.to_string()))
 }
 
 fn validate_rule_pattern(match_type: &RuleMatchType, pattern: &str) -> Result<()> {
@@ -562,10 +726,10 @@ mod tests {
     impl CategorizationRulesRepositoryTrait for MockRulesRepo {
         async fn update_reviewed(
             &self,
-            _: CategorizationRule,
-            _: UpdateCategorizationRule,
+            expected: CategorizationRule,
+            patch: UpdateCategorizationRule,
         ) -> Result<CategorizationRule> {
-            unimplemented!("reviewed rule")
+            self.update(&expected.id, patch).await
         }
         async fn delete_reviewed(&self, _: CategorizationRule) -> Result<()> {
             unimplemented!("reviewed rule")
@@ -598,6 +762,8 @@ mod tests {
                 amount_op: n.amount_op,
                 amount_value: n.amount_value,
                 amount_value2: n.amount_value2,
+                payee_condition_id: n.payee_condition_id,
+                set_payee_id: n.set_payee_id,
                 priority: n.priority,
                 is_global: n.is_global,
                 account_id: n.account_id,
@@ -648,6 +814,12 @@ mod tests {
             if let Some(v) = p.amount_value2 {
                 rule.amount_value2 = v;
             }
+            if let Some(v) = p.payee_condition_id {
+                rule.payee_condition_id = v;
+            }
+            if let Some(v) = p.set_payee_id {
+                rule.set_payee_id = v;
+            }
             if let Some(v) = p.priority {
                 rule.priority = v;
             }
@@ -674,6 +846,8 @@ mod tests {
                     amount_op: Some(n.amount_op),
                     amount_value: Some(n.amount_value),
                     amount_value2: Some(n.amount_value2),
+                    payee_condition_id: Some(n.payee_condition_id),
+                    set_payee_id: Some(n.set_payee_id),
                     priority: Some(n.priority),
                     is_global: Some(n.is_global),
                     account_id: Some(n.account_id),
@@ -741,6 +915,8 @@ mod tests {
                     amount_op: n.amount_op,
                     amount_value: n.amount_value,
                     amount_value2: n.amount_value2,
+                    payee_condition_id: n.payee_condition_id,
+                    set_payee_id: n.set_payee_id,
                     priority: n.priority,
                     is_global: n.is_global,
                     account_id: n.account_id,
@@ -891,6 +1067,13 @@ mod tests {
 
     #[async_trait]
     impl CashActivityServiceTrait for MockActivityRepo {
+        /// The payees the tests know. `payee_gone` is left out on purpose.
+        async fn payee_ids(&self) -> Result<std::collections::HashSet<String>> {
+            Ok(["payee_bakery", "payee_amazon", "payee_netflix"]
+                .into_iter()
+                .map(str::to_string)
+                .collect())
+        }
         async fn list_for_rules(
             &self,
             account_ids: &[String],
@@ -1222,6 +1405,8 @@ mod tests {
             amount_op: None,
             amount_value: None,
             amount_value2: None,
+            payee_condition_id: None,
+            set_payee_id: None,
             priority,
             is_global: true,
             account_id: None,
@@ -1634,6 +1819,8 @@ mod tests {
                 amount_op: None,
                 amount_value: None,
                 amount_value2: None,
+                payee_condition_id: None,
+                set_payee_id: None,
                 priority: 1,
                 is_global: true,
                 account_id: Some("acct1".to_string()),
@@ -1679,6 +1866,8 @@ mod tests {
                 amount_op: None,
                 amount_value: None,
                 amount_value2: None,
+                payee_condition_id: None,
+                set_payee_id: None,
                 priority: 1,
                 is_global: false,
                 account_id: None,
@@ -1724,6 +1913,8 @@ mod tests {
                 amount_op: None,
                 amount_value: None,
                 amount_value2: None,
+                payee_condition_id: None,
+                set_payee_id: None,
                 priority: 1,
                 is_global: true,
                 account_id: None,
@@ -2001,6 +2192,8 @@ mod tests {
             amount_op: None,
             amount_value: None,
             amount_value2: None,
+            payee_condition_id: None,
+            set_payee_id: None,
             priority: 1,
             is_global: true,
             account_id: None,
@@ -2198,5 +2391,516 @@ mod tests {
         let mut written: Vec<&str> = writes.iter().map(|w| w.activity_id.as_str()).collect();
         written.sort();
         assert_eq!(written, vec!["large", "negative"]);
+    }
+
+    // ----- payee conditions and "also set payee" ---------------------------
+
+    /// A service whose activities carry `existing` assignments, both on the
+    /// rows the planner reads and in the writer that protects them.
+    fn mk_payee_svc(
+        rules: Vec<CategorizationRule>,
+        activities: Vec<Activity>,
+        existing: Vec<ActivityTaxonomyAssignment>,
+    ) -> (
+        CategorizationRulesService,
+        Arc<MockRulesRepo>,
+        Arc<MockAssignmentRepo>,
+    ) {
+        let rules_repo = Arc::new(MockRulesRepo {
+            rules: Mutex::new(rules),
+        });
+        let assignment_repo = Arc::new(MockAssignmentRepo {
+            existing: Mutex::new(existing.clone()),
+            writes: Mutex::new(vec![]),
+        });
+        let activity_repo = Arc::new(MockActivityRepo {
+            activities,
+            assignments: existing,
+        });
+        let svc = CategorizationRulesService::new(
+            rules_repo.clone() as Arc<dyn CategorizationRulesRepositoryTrait>,
+            activity_repo as Arc<dyn CashActivityServiceTrait>,
+            Arc::new(ActivityTaxonomyAssignmentService::new(
+                assignment_repo.clone() as Arc<dyn ActivityTaxonomyAssignmentRepositoryTrait>,
+            )),
+        );
+        (svc, rules_repo, assignment_repo)
+    }
+
+    /// A category rule that matches on a payee alone.
+    fn mk_payee_condition_rule(
+        id: &str,
+        payee: &str,
+        cat: &str,
+        priority: i32,
+    ) -> CategorizationRule {
+        let mut rule = mk_rule(
+            id,
+            NO_TEXT_CONDITION_PATTERN,
+            "spending_categories",
+            cat,
+            priority,
+        );
+        rule.match_type = RuleMatchType::Regex;
+        rule.payee_condition_id = Some(payee.to_string());
+        rule
+    }
+
+    /// The writes that went through, as sorted `(activity, taxonomy, category)`.
+    fn applied(repo: &MockAssignmentRepo) -> Vec<(String, String, String)> {
+        let mut writes: Vec<_> = repo
+            .writes
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|w| {
+                (
+                    w.activity_id.clone(),
+                    w.taxonomy_id.clone(),
+                    w.category_id.clone(),
+                )
+            })
+            .collect();
+        writes.sort();
+        writes
+    }
+
+    fn row(a: &str, t: &str, c: &str) -> (String, String, String) {
+        (a.to_string(), t.to_string(), c.to_string())
+    }
+
+    #[tokio::test]
+    async fn a_payee_rule_feeds_a_payee_condition_rule_in_the_same_run() {
+        let (svc, _, assignments) = mk_payee_svc(
+            vec![
+                mk_rule("payee", "AMZN", PAYEES_TAXONOMY, "payee_amazon", 0),
+                mk_payee_condition_rule("category", "payee_amazon", "cat_shopping", 0),
+            ],
+            vec![
+                mk_activity("amazon", "acct1", "AMZN MKTP 123"),
+                mk_activity("other", "acct1", "CITY WATER"),
+            ],
+            vec![],
+        );
+
+        let summary = svc
+            .rerun_detailed(&["acct1".to_string()], true)
+            .await
+            .unwrap();
+        assert_eq!(summary.matched, 1);
+        assert_eq!(
+            applied(&assignments),
+            vec![
+                row("amazon", PAYEES_TAXONOMY, "payee_amazon"),
+                row("amazon", "spending_categories", "cat_shopping"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_manual_payee_drives_a_payee_condition_rule() {
+        let (svc, _, assignments) = mk_payee_svc(
+            vec![
+                // The text says Netflix, the user said Amazon: the user's
+                // payee stands and is what the category rule sees.
+                mk_rule("payee", "NETFLIX", PAYEES_TAXONOMY, "payee_netflix", 0),
+                mk_payee_condition_rule("amazon", "payee_amazon", "cat_shopping", 0),
+                mk_payee_condition_rule("netflix", "payee_netflix", "cat_streaming", 0),
+            ],
+            vec![mk_activity("act", "acct1", "NETFLIX.COM")],
+            vec![mk_assignment(
+                "act",
+                PAYEES_TAXONOMY,
+                "payee_amazon",
+                "manual",
+            )],
+        );
+
+        svc.rerun_detailed(&["acct1".to_string()], false)
+            .await
+            .unwrap();
+        assert_eq!(
+            applied(&assignments),
+            vec![row("act", "spending_categories", "cat_shopping")]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_payee_condition_rule_leaves_a_manual_category_alone() {
+        let (svc, _, assignments) = mk_payee_svc(
+            vec![
+                mk_rule("payee", "AMZN", PAYEES_TAXONOMY, "payee_amazon", 0),
+                mk_payee_condition_rule("category", "payee_amazon", "cat_shopping", 0),
+            ],
+            vec![mk_activity("act", "acct1", "AMZN MKTP")],
+            vec![mk_assignment(
+                "act",
+                "spending_categories",
+                "cat_gifts",
+                "manual",
+            )],
+        );
+
+        let summary = svc
+            .rerun_detailed(&["acct1".to_string()], false)
+            .await
+            .unwrap();
+        assert_eq!(summary.matched, 1);
+        // The payee is filed; the category the user chose is not replaced.
+        assert_eq!(
+            applied(&assignments),
+            vec![row("act", PAYEES_TAXONOMY, "payee_amazon")]
+        );
+    }
+
+    #[tokio::test]
+    async fn an_existing_rule_payee_stands_unless_the_run_overwrites() {
+        let rules = || {
+            vec![
+                mk_rule("payee", "AMZN", PAYEES_TAXONOMY, "payee_amazon", 0),
+                mk_payee_condition_rule("amazon", "payee_amazon", "cat_shopping", 0),
+                mk_payee_condition_rule("bakery", "payee_bakery", "cat_food", 0),
+            ]
+        };
+        let existing = || {
+            vec![mk_assignment(
+                "act",
+                PAYEES_TAXONOMY,
+                "payee_bakery",
+                "rule",
+            )]
+        };
+        let activity = || vec![mk_activity("act", "acct1", "AMZN MKTP")];
+
+        // Only-uncategorized: the payee an earlier run set is kept, so the
+        // category follows it, not the payee this run would have set.
+        let (svc, _, assignments) = mk_payee_svc(rules(), activity(), existing());
+        svc.rerun_detailed(&["acct1".to_string()], true)
+            .await
+            .unwrap();
+        assert_eq!(
+            applied(&assignments),
+            vec![row("act", "spending_categories", "cat_food")]
+        );
+
+        // Overwriting: the payee is replaced and the category follows the new one.
+        let (svc, _, assignments) = mk_payee_svc(rules(), activity(), existing());
+        svc.rerun_detailed(&["acct1".to_string()], false)
+            .await
+            .unwrap();
+        assert_eq!(
+            applied(&assignments),
+            vec![
+                row("act", PAYEES_TAXONOMY, "payee_amazon"),
+                row("act", "spending_categories", "cat_shopping"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_category_rule_also_sets_its_payee_and_respects_a_manual_one() {
+        let mut rule = mk_rule("both", "AMZN", "spending_categories", "cat_shopping", 0);
+        rule.set_payee_id = Some("payee_amazon".to_string());
+        let (svc, _, assignments) = mk_payee_svc(
+            vec![rule],
+            vec![
+                mk_activity("fresh", "acct1", "AMZN MKTP 1"),
+                mk_activity("named", "acct1", "AMZN MKTP 2"),
+            ],
+            vec![mk_assignment(
+                "named",
+                PAYEES_TAXONOMY,
+                "payee_bakery",
+                "manual",
+            )],
+        );
+
+        let summary = svc
+            .rerun_detailed(&["acct1".to_string()], false)
+            .await
+            .unwrap();
+        assert_eq!(summary.matched, 2);
+        assert_eq!(
+            applied(&assignments),
+            vec![
+                row("fresh", PAYEES_TAXONOMY, "payee_amazon"),
+                row("fresh", "spending_categories", "cat_shopping"),
+                // The user's payee is kept; the category is still set.
+                row("named", "spending_categories", "cat_shopping"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_payee_a_category_rule_sets_feeds_payee_condition_rules() {
+        let mut setter = mk_rule("setter", "AMZN", "spending_categories", "cat_shopping", 0);
+        setter.set_payee_id = Some("payee_amazon".to_string());
+        let (svc, _, assignments) = mk_payee_svc(
+            vec![
+                setter,
+                // Same priority: the payee condition is the more specific rule.
+                mk_payee_condition_rule("by-payee", "payee_amazon", "cat_gifts", 0),
+            ],
+            vec![mk_activity("act", "acct1", "AMZN MKTP")],
+            vec![],
+        );
+
+        svc.rerun_detailed(&["acct1".to_string()], true)
+            .await
+            .unwrap();
+        assert_eq!(
+            applied(&assignments),
+            vec![
+                row("act", PAYEES_TAXONOMY, "payee_amazon"),
+                row("act", "spending_categories", "cat_gifts"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_payee_that_is_gone_is_neither_matched_nor_written() {
+        let mut setter = mk_rule("setter", "AMZN", "spending_categories", "cat_shopping", 5);
+        setter.set_payee_id = Some("payee_gone".to_string());
+        let (svc, _, assignments) = mk_payee_svc(
+            vec![
+                setter,
+                mk_payee_condition_rule("by-gone", "payee_gone", "cat_gifts", 10),
+            ],
+            vec![mk_activity("act", "acct1", "AMZN MKTP")],
+            vec![],
+        );
+
+        let summary = svc
+            .rerun_detailed(&["acct1".to_string()], true)
+            .await
+            .unwrap();
+        assert_eq!(summary.matched, 1);
+        // The category of the rule that matched on text is applied; the
+        // missing payee is not written, and the rule conditioned on it stays
+        // silent although it has the higher priority.
+        assert_eq!(
+            applied(&assignments),
+            vec![row("act", "spending_categories", "cat_shopping")]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_payee_only_rule_is_stored_with_the_placeholder_pattern() {
+        let (svc, _, _) = mk_svc(vec![], vec![]);
+        let mut new_rule = base_new_rule();
+        new_rule.pattern = "  ".to_string();
+        new_rule.match_type = RuleMatchType::Contains;
+        new_rule.payee_condition_id = Some("payee_amazon".to_string());
+
+        let created = svc.create(new_rule).await.unwrap();
+        assert_eq!(created.match_type, RuleMatchType::Regex);
+        assert_eq!(created.pattern, NO_TEXT_CONDITION_PATTERN);
+        assert!(!created.has_text_condition());
+        // What a version without payee conditions does with the stored rule:
+        // it compiles the pattern, fails, and never matches.
+        assert!(compile_regex_pattern(&created.pattern).is_err());
+
+        // Giving it a text condition later stores the text as written.
+        let updated = svc
+            .update(
+                &created.id,
+                UpdateCategorizationRule {
+                    pattern: Some("PRIME".to_string()),
+                    match_type: Some(RuleMatchType::Contains),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(updated.pattern, "PRIME");
+        assert_eq!(updated.match_type, RuleMatchType::Contains);
+
+        // Clearing the text again goes back to the placeholder.
+        let cleared = svc
+            .update(
+                &created.id,
+                UpdateCategorizationRule {
+                    pattern: Some(String::new()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(cleared.match_type, RuleMatchType::Regex);
+        assert_eq!(cleared.pattern, NO_TEXT_CONDITION_PATTERN);
+    }
+
+    #[tokio::test]
+    async fn a_rule_with_no_condition_is_refused() {
+        let (svc, _, _) = mk_svc(vec![], vec![]);
+
+        let mut empty = base_new_rule();
+        empty.pattern = String::new();
+        let err = svc.create(empty.clone()).await.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("text condition or a payee condition"));
+        empty.id = Some("explicit".to_string());
+        assert!(svc.upsert(empty).await.is_err());
+
+        // The placeholder without a payee condition is no condition either.
+        let mut placeholder = base_new_rule();
+        placeholder.pattern = NO_TEXT_CONDITION_PATTERN.to_string();
+        placeholder.match_type = RuleMatchType::Regex;
+        assert!(svc.create(placeholder).await.is_err());
+
+        // Removing the payee condition of a payee-only rule leaves nothing.
+        let mut payee_only = base_new_rule();
+        payee_only.pattern = String::new();
+        payee_only.payee_condition_id = Some("payee_amazon".to_string());
+        let created = svc.create(payee_only).await.unwrap();
+        let err = svc
+            .update(
+                &created.id,
+                UpdateCategorizationRule {
+                    payee_condition_id: Some(None),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("text condition or a payee condition"));
+        assert_eq!(
+            svc.get(&created.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .payee_condition_id
+                .as_deref(),
+            Some("payee_amazon")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_rule_cannot_match_on_a_payee_and_set_one() {
+        let (svc, _, _) = mk_svc(vec![], vec![]);
+
+        let mut both = base_new_rule();
+        both.payee_condition_id = Some("payee_amazon".to_string());
+        both.set_payee_id = Some("payee_netflix".to_string());
+        let err = svc.create(both).await.unwrap_err();
+        assert!(err.to_string().contains("cannot set a payee"));
+
+        let mut payee_target = base_new_rule();
+        payee_target.taxonomy_id = Some(PAYEES_TAXONOMY.to_string());
+        payee_target.category_id = Some("payee_netflix".to_string());
+        payee_target.payee_condition_id = Some("payee_amazon".to_string());
+        assert!(svc.create(payee_target.clone()).await.is_err());
+
+        // "Also set payee" belongs to category rules only.
+        payee_target.payee_condition_id = None;
+        payee_target.set_payee_id = Some("payee_amazon".to_string());
+        let err = svc.create(payee_target).await.unwrap_err();
+        assert!(err.to_string().contains("sets a category"));
+        let mut targetless = base_new_rule();
+        targetless.taxonomy_id = None;
+        targetless.category_id = None;
+        targetless.set_payee_id = Some("payee_amazon".to_string());
+        assert!(svc.create(targetless).await.is_err());
+
+        // An update is checked against the rule it leaves behind.
+        let mut setter = base_new_rule();
+        setter.set_payee_id = Some("payee_amazon".to_string());
+        let created = svc.create(setter).await.unwrap();
+        assert!(svc
+            .update(
+                &created.id,
+                UpdateCategorizationRule {
+                    payee_condition_id: Some(Some("payee_netflix".to_string())),
+                    ..Default::default()
+                },
+            )
+            .await
+            .is_err());
+        assert!(svc
+            .update(
+                &created.id,
+                UpdateCategorizationRule {
+                    taxonomy_id: Some(Some(PAYEES_TAXONOMY.to_string())),
+                    category_id: Some(Some("payee_netflix".to_string())),
+                    ..Default::default()
+                },
+            )
+            .await
+            .is_err());
+        // Swapping one for the other in a single patch is fine.
+        let swapped = svc
+            .update(
+                &created.id,
+                UpdateCategorizationRule {
+                    payee_condition_id: Some(Some("payee_netflix".to_string())),
+                    set_payee_id: Some(None),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(swapped.payee_condition_id.as_deref(), Some("payee_netflix"));
+        assert_eq!(swapped.set_payee_id, None);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_payee_is_refused_when_a_rule_starts_to_name_it() {
+        let (svc, rules_repo, _) = mk_svc(vec![], vec![]);
+
+        let mut unknown = base_new_rule();
+        unknown.payee_condition_id = Some("payee_gone".to_string());
+        let err = svc.create(unknown).await.unwrap_err();
+        assert!(err.to_string().contains("Unknown payee"));
+        let mut unknown = base_new_rule();
+        unknown.set_payee_id = Some("payee_gone".to_string());
+        assert!(svc.create(unknown).await.is_err());
+
+        // A rule whose payee has since gone can still be edited.
+        let mut stale = mk_payee_condition_rule("stale", "payee_gone", "cat_food", 0);
+        stale.pattern = "AMZN".to_string();
+        stale.match_type = RuleMatchType::Contains;
+        rules_repo.rules.lock().unwrap().push(stale);
+        let renamed = svc
+            .update(
+                "stale",
+                UpdateCategorizationRule {
+                    name: Some("renamed".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(renamed.payee_condition_id.as_deref(), Some("payee_gone"));
+        // ...but not pointed at another payee that does not exist.
+        assert!(svc
+            .update(
+                "stale",
+                UpdateCategorizationRule {
+                    payee_condition_id: Some(Some("payee_also_gone".to_string())),
+                    ..Default::default()
+                },
+            )
+            .await
+            .is_err());
+    }
+
+    #[tokio::test]
+    async fn a_reviewed_edit_carries_the_payee_fields() {
+        let mut existing = mk_rule("r", "AMZN", "spending_categories", "cat_shopping", 0);
+        existing.payee_condition_id = Some("payee_amazon".to_string());
+        let (svc, _, _) = mk_svc(vec![existing.clone()], vec![]);
+
+        // The proposal an assistant edit builds: the stored rule with one
+        // field changed. The payee condition must come out the other side.
+        let mut proposed: NewCategorizationRule =
+            serde_json::from_value(serde_json::to_value(&existing).unwrap()).unwrap();
+        proposed.name = "renamed".to_string();
+        let updated = svc.update_reviewed(existing, proposed).await.unwrap();
+        assert_eq!(updated.name, "renamed");
+        assert_eq!(updated.payee_condition_id.as_deref(), Some("payee_amazon"));
+        assert_eq!(updated.pattern, "AMZN");
     }
 }

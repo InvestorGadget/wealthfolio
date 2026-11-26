@@ -301,6 +301,23 @@ pub async fn compute_categorization_state(
         .map_err(|e| AgentToolError::ExecutionFailed(e.to_string()))?;
     let compiled_rules =
         wealthfolio_spending::categorization_rules::matcher::compile_rules(&all_rules);
+    // The rule pass a rerun makes: payees first, so a rule that matches on a
+    // payee sees the one the rules would give the row.
+    use wealthfolio_spending::categorization_rules::matcher::{
+        effective_payee, RuleInput, RulePasses,
+    };
+    let known_payees = if RulePasses::needs_known_payees(&all_rules) {
+        Some(
+            env.taxonomy_service()
+                .get_taxonomy(wealthfolio_spending::activity_assignments::PAYEES_TAXONOMY)
+                .map_err(|e| AgentToolError::ExecutionFailed(e.to_string()))?
+                .map(|entry| entry.categories.into_iter().map(|c| c.id).collect())
+                .unwrap_or_default(),
+        )
+    } else {
+        None
+    };
+    let rule_passes = RulePasses::new(&compiled_rules, known_payees.as_ref());
 
     let total = targets.len();
     let mut proposals = Vec::new();
@@ -316,15 +333,25 @@ pub async fn compute_categorization_state(
 
         let notes = act.notes.as_deref().unwrap_or("");
         let notes_upper = notes.to_uppercase();
+        let mut rule_input = RuleInput {
+            notes_upper: &notes_upper,
+            notes_raw: notes,
+            activity_type: act.effective_type(),
+            account_id: &act.account_id,
+            amount: act.amount.map(|d| d.abs()),
+            payee_id: None,
+        };
+        // As in the default rerun, which keeps a payee the row already has.
+        rule_input.payee_id = effective_payee(
+            &target.assignments,
+            rule_passes.planned_payee(&rule_input),
+            true,
+        );
         let rule_match =
             wealthfolio_spending::categorization_rules::matcher::match_compiled_for_taxonomy(
-                &compiled_rules,
+                rule_passes.category_rules(),
                 Some(expected_taxonomy),
-                &notes_upper,
-                notes,
-                act.effective_type(),
-                &act.account_id,
-                act.amount.map(|d| d.abs()),
+                &rule_input,
             );
         if let Some(m) = rule_match {
             if let (Some(tax_id), Some(cat_id)) =
