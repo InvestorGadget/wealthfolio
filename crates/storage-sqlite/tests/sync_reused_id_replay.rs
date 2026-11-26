@@ -1987,9 +1987,9 @@ async fn an_older_versions_resave_of_a_rule_keeps_its_payee_fields() {
 }
 
 /// What a version without the payee columns does with a rule that names
-/// them: it rejects the whole event (the sync engine then dead-letters it), so
-/// it never holds such a rule with its payee condition stripped. Shown here
-/// with a column this version does not have.
+/// them: replay dead-letters the whole event and applies nothing of it, so it
+/// never holds such a rule with its payee condition stripped. Shown here with
+/// a column this version does not have.
 #[tokio::test]
 async fn a_rule_payload_naming_an_unknown_column_is_rejected_whole() {
     let b = Device::new();
@@ -2016,6 +2016,10 @@ async fn a_rule_payload_naming_an_unknown_column_is_rejected_whole() {
             }),
         )])
         .await;
-    assert!(outcome.is_err(), "an unknown column must fail the event");
+    assert_eq!(
+        outcome.expect("a failing event is dead-lettered, not a failed replay"),
+        0,
+        "an unknown column must fail the event"
+    );
     assert_eq!(rule_payee_row(&b, "rule-from-the-future"), None);
 }
