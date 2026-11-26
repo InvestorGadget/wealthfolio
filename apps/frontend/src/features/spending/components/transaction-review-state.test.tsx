@@ -226,3 +226,56 @@ describe("no notes", () => {
     expect(screen.getAllByText("—")).toHaveLength(2);
   });
 });
+
+describe("bank text", () => {
+  function renderBoth(overrides: Partial<CashActivity>) {
+    const row = toRowVM(activity(overrides), new Map());
+    return render(
+      <>
+        <TransactionCard row={row} selectionMode={false} {...shared} />
+        <Table>
+          <TableBody>
+            <TransactionRow row={row} {...shared} />
+          </TableBody>
+        </Table>
+      </>,
+      { wrapper: withProviders },
+    );
+  }
+
+  it("titles an edited import with the notes and shows the bank's text muted apart", () => {
+    renderBoth({ importedDescription: "TESCO STORES 3301", notes: "Weekly shop" });
+
+    // Once on the card and once in the row, each.
+    expect(screen.getAllByText("Weekly shop")).toHaveLength(2);
+    const bankTexts = screen.getAllByText("TESCO STORES 3301");
+    expect(bankTexts).toHaveLength(2);
+    for (const text of bankTexts) {
+      expect(text).toHaveClass("text-muted-foreground", "text-xs");
+    }
+    // Said in words too, not by position and colour alone.
+    expect(screen.getAllByText("Bank description: TESCO STORES 3301")).toHaveLength(2);
+  });
+
+  it("shows the text once when the notes are still the bank's", () => {
+    renderBoth({ importedDescription: "TESCO STORES 3301", notes: "TESCO STORES 3301 " });
+
+    expect(screen.getAllByText("TESCO STORES 3301")).toHaveLength(2);
+    expect(screen.queryByText(/Bank description/)).not.toBeInTheDocument();
+  });
+
+  it("titles a manual entry with its notes, as before", () => {
+    renderBoth({ importedDescription: null, notes: "Corner shop" });
+
+    expect(screen.getAllByText("Corner shop")).toHaveLength(2);
+    expect(screen.queryByText(/Bank description/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the bank's text as the title when the notes were cleared", () => {
+    renderBoth({ importedDescription: "TESCO STORES 3301", notes: "" });
+
+    expect(screen.getAllByText("TESCO STORES 3301")).toHaveLength(2);
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Bank description/)).not.toBeInTheDocument();
+  });
+});

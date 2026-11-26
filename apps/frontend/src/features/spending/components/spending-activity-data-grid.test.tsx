@@ -182,6 +182,27 @@ describe("SpendingActivityDataGrid", () => {
     expect(harness.bulkAssign).not.toHaveBeenCalled();
   });
 
+  it("shows the bank description in its own column and never saves it", async () => {
+    harness.saveActivities.mockResolvedValue({ ...NOTHING_SAVED, updated: [{ id: "a1" }] });
+    renderGrid([activity({ notes: "Weekly shop", importedDescription: "TESCO STORES 3301" })]);
+
+    expect(rows()[0]).toMatchObject({
+      comment: "Weekly shop",
+      importedDescription: "TESCO STORES 3301",
+    });
+    const column = harness.options.columns.find((c) => c.id === "importedDescription");
+    expect(column?.header).toBe("spending:transactions.bankDescription");
+    // No cell variant: the grid has no editor for it.
+    expect(column?.meta?.cell).toBeUndefined();
+
+    edit("a1", { comment: "Groceries" });
+    await save();
+
+    const request = harness.saveActivities.mock.calls[0][0] as ActivityBulkMutationRequest;
+    expect(request.updates?.[0]).toMatchObject({ id: "a1", notes: "Groceries" });
+    expect(request.updates?.[0]).not.toHaveProperty("importedDescription");
+  });
+
   it("turns a new credit on a cash account into an external reimbursement", async () => {
     harness.saveActivities.mockResolvedValue({ ...NOTHING_SAVED, updated: [{ id: "a1" }] });
     renderGrid([activity({ assignments: [] })]);

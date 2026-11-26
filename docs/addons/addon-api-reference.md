@@ -568,6 +568,13 @@ const row: ActivityImport = {
 };
 ```
 
+An imported row's `comment` becomes the activity's notes, which the user can
+edit, and is also kept unchanged as the activity's `importedDescription`: the
+text categorization rules match and the app shows as the bank's description. If
+your add-on writes its own text to `comment`, send the bank's original text in
+`importedDescription`. Importing a row again never replaces a stored imported
+description; it only fills one that is empty.
+
 #### `checkImport(activities: ActivityImport[]): Promise<ActivityImport[]>`
 
 Validates and normalizes activities without importing them.

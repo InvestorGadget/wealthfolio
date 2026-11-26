@@ -16,6 +16,7 @@ import {
   useDateFormatting,
 } from "@wealthfolio/ui";
 
+import { getDifferingBankText, getTransactionTitle } from "../lib/bank-text";
 import { getTransactionDisplay, type TransactionRowVM } from "../lib/transactions-helpers";
 import { CategoryIconTile } from "./category-chips";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
@@ -89,6 +90,8 @@ function TransactionRowImpl({
 
   const { t } = useTranslation();
   const a = row.activity;
+  const title = getTransactionTitle(a);
+  const bankText = getDifferingBankText(a);
   const { isOutflow, isIncome, isSaving, isNeutral, sign, safeAmount } = getTransactionDisplay(
     a,
     account?.accountType,
@@ -131,8 +134,26 @@ function TransactionRowImpl({
       <TableCell className="max-w-0! px-3 py-2">
         <div className="flex items-center gap-2">
           {row.needsReview && <NeedsReviewIcon label={t("spending:transactions.review")} />}
-          {a.notes?.trim() ? (
-            <TruncatedText text={a.notes} className="text-sm" />
+          {title ? (
+            <div className="min-w-0">
+              <TruncatedText text={title} className="text-sm" />
+              {/* The bank's own text, when the notes say something else: it is
+                  what categorization rules match. Said in words for a screen
+                  reader: an aria-label on a role-less element is not reliably
+                  announced. */}
+              {bankText && (
+                <>
+                  <span className="sr-only">
+                    {t("spending:transactions.bankText", { text: bankText })}
+                  </span>
+                  <TruncatedText
+                    text={bankText}
+                    aria-hidden="true"
+                    className="text-muted-foreground text-xs"
+                  />
+                </>
+              )}
+            </div>
           ) : (
             <span className="text-muted-foreground text-sm italic">—</span>
           )}

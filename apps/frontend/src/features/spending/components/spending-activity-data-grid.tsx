@@ -13,6 +13,7 @@ import { toast } from "@wealthfolio/ui/components/ui/use-toast";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { TruncatedText } from "@/components/truncated-text";
 import { usePersistentState } from "@/hooks/use-persistent-state";
 import { ActivityStatus, ActivityType } from "@/lib/constants";
 import { useSettingsContext } from "@/lib/settings-provider";
@@ -80,6 +81,7 @@ const TOGGLEABLE_COLUMNS = [
   "currency",
   "fxRate",
   "comment",
+  "importedDescription",
 ] as const;
 /** Stands in for a split row's category, which lives in its lines. */
 const SPLIT_VALUE = "__split__";
@@ -472,6 +474,21 @@ export function SpendingActivityDataGrid({
         meta: { cell: { variant: "long-text" } },
       },
       {
+        // The bank's text as imported: read-only, beside the notes the user edits.
+        id: "importedDescription",
+        accessorFn: (row) => row.importedDescription ?? "",
+        header: t("spending:transactions.bankDescription"),
+        size: 240,
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="text-muted-foreground flex size-full min-w-0 items-center px-2 text-xs">
+            {row.original.importedDescription?.trim() ? (
+              <TruncatedText text={row.original.importedDescription} />
+            ) : null}
+          </div>
+        ),
+      },
+      {
         id: "actions",
         header: () => null,
         size: 64,
@@ -817,7 +834,13 @@ export function SpendingActivityDataGrid({
     });
   }, [dataGrid.table, onRefetch, resetChangeState, serverTransactions, setRows, t]);
 
-  const columnLabels = useMemo(() => ({ categoryId: t("spending:filters.category") }), [t]);
+  const columnLabels = useMemo(
+    () => ({
+      categoryId: t("spending:filters.category"),
+      importedDescription: t("spending:transactions.bankDescription"),
+    }),
+    [t],
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col space-y-3" data-testid="spending-activity-grid">

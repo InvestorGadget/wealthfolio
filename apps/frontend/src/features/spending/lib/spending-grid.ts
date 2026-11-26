@@ -57,6 +57,7 @@ export function toActivityDetails(activity: CashActivity, account?: Account): Ac
     currency: activity.currency,
     needsReview: activity.needsReview,
     comment: activity.notes ?? undefined,
+    importedDescription: activity.importedDescription ?? undefined,
     fxRate: activity.fxRate ?? null,
     createdAt: new Date(activity.createdAt),
     updatedAt: new Date(activity.updatedAt),

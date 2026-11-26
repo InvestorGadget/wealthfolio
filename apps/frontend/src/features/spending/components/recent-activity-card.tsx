@@ -11,6 +11,7 @@ import { PrivacyAmount, useDateFormatting } from "@wealthfolio/ui";
 import { Item, ItemActions, ItemContent, ItemTitle } from "@wealthfolio/ui/components/ui/item";
 
 import { getActivityAssignments } from "../adapters/cash-activities";
+import { getTransactionTitle } from "../lib/bank-text";
 import {
   getActivitySpendingAmount,
   getEffectiveCashActivityType,
@@ -144,7 +145,7 @@ export function RecentActivityCard({
               {dayLabel(dateKey)}
             </div>
             {items.map((a) => {
-              const payee = (a.notes ?? "").trim();
+              const payee = (getTransactionTitle(a) ?? "").trim();
               const spendingAmount = getActivitySpendingAmount(
                 a,
                 accountTypeById?.get(a.accountId),

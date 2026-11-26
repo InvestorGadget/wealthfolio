@@ -7,6 +7,7 @@ import { AccountType } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { Card, Icons, PrivacyAmount, useDateFormatting } from "@wealthfolio/ui";
 
+import { getDifferingBankText, getTransactionTitle } from "../lib/bank-text";
 import { getEffectiveCashActivityType, isCreditCardAccountType } from "../lib/constants";
 import {
   getTransactionDisplay,
@@ -88,6 +89,8 @@ function TransactionCardImpl({
 
   const { t } = useTranslation();
   const a = row.activity;
+  const title = getTransactionTitle(a);
+  const bankText = getDifferingBankText(a);
   const { isOutflow, isIncome, isSaving, isNeutral, sign, safeAmount } = getTransactionDisplay(
     a,
     account?.accountType,
@@ -139,7 +142,7 @@ function TransactionCardImpl({
             {row.needsReview && <NeedsReviewMark label={t("spending:transactions.review")} />}
             <span className="text-foreground min-w-0 flex-1 truncate text-sm font-medium">
               {/* The form saves no notes as "", which must not leave a blank title. */}
-              {a.notes?.trim() ? a.notes : <span className="text-muted-foreground italic">—</span>}
+              {title ?? <span className="text-muted-foreground italic">—</span>}
             </span>
             <span
               className={cn(
@@ -157,6 +160,22 @@ function TransactionCardImpl({
               <PrivacyAmount value={Math.abs(safeAmount)} currency={a.currency} />
             </span>
           </div>
+
+          {/* The bank's own text, when the notes say something else. */}
+          {bankText && (
+            <>
+              <span className="sr-only">
+                {t("spending:transactions.bankText", { text: bankText })}
+              </span>
+              <div
+                dir="auto"
+                aria-hidden="true"
+                className="text-muted-foreground mt-0.5 truncate text-xs rtl:text-right"
+              >
+                {bankText}
+              </div>
+            </>
+          )}
 
           {/* Everything secondary shares one line: the day heading above owns
               the date, and the category sits inline the way the table row shows

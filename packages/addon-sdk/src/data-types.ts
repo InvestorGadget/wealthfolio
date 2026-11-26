@@ -203,6 +203,11 @@ export interface Activity {
 
   // Metadata
   notes?: string;
+  /**
+   * The description the bank, broker or import file sent, as received. Set
+   * by imports and never edited; absent on manual entries.
+   */
+  importedDescription?: string | null;
   metadata?: Record<string, unknown>;
 
   // Source identity
@@ -251,6 +256,8 @@ export interface ActivityDetails {
   currency: string;
   needsReview: boolean;
   comment?: string;
+  /** The description the bank, broker or import file sent; `comment` is the user's notes. */
+  importedDescription?: string | null;
   fxRate?: string | null;
   createdAt: Date;
   assetId: string;
@@ -474,6 +481,13 @@ export interface ActivityImport {
    */
   sourceGroupId?: string;
   comment?: string;
+  /**
+   * The bank's own description of the transaction, when you write other text
+   * to `comment`. It is stored as the activity's `importedDescription`, which
+   * categorization rules match and which stays as sent when the user edits
+   * the notes. Omit it and the row's `comment` is stored instead.
+   */
+  importedDescription?: string;
   /**
    * Labelled lines that make up `fee` and `tax`, such as commission and stamp
    * duty. Lines must add up to both totals or the row is rejected; they are

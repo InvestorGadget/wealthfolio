@@ -173,6 +173,8 @@
     "categorizeHint": "Select transactions from one non-neutral cash-flow bucket to categorize",
     "tagEvent": "Tag event",
     "deselect": "Deselect transaction",
+    "bankText": "Bank description: {{text}}",
+    "bankDescription": "Bank description",
     "select": "Select transaction",
     "review": "Review",
     "neutral": "Neutral",
@@ -897,6 +899,8 @@
     "tagEventOptional": "Tag an event (optional)",
     "notesPayee": "Notes / Payee",
     "notesPlaceholder": "e.g., AMAZON*MARKETPLACE, STARBUCKS COFFEE",
+    "bankDescription": "Bank description",
+    "bankDescriptionHint": "As imported. Rules match this text, whatever the notes say.",
     "updateTransaction": "Update Transaction",
     "createTransaction": "Create Transaction",
     "typeChange": {

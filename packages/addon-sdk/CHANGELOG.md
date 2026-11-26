@@ -4,6 +4,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Activity.importedDescription` and `ActivityDetails.importedDescription`: the
+  description the bank, broker or import file sent, kept as received. `notes`
+  (`comment` on details) stays the user's own text; categorization rules match
+  the imported description when an activity has one. Absent on manual entries
+  and on older hosts.
+- `ActivityImport.importedDescription`: the bank's own description of a row, for
+  an add-on that writes other text to `comment`. A row without one stores its
+  `comment` as the imported description, so existing add-ons need no change.
+  Older hosts ignore the field.
+
 ## [3.13.1] - 2026-11-18
 
 ### Changed

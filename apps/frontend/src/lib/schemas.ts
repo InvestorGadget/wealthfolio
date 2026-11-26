@@ -238,6 +238,10 @@ export const importActivitySchema = z
     lineNumber: z.number().optional(),
     isDraft: z.boolean(),
     comment: z.string().optional(),
+    /** The bank's or file's own description of the row, when `comment` holds
+     * other text. Stored as the activity's imported description; a row
+     * without one stores its comment. */
+    importedDescription: z.string().optional(),
     fxRate: decimalLikeSchema.nullable().optional(),
     subtype: z.string().optional(),
     forceImport: z.boolean().default(false),

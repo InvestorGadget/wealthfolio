@@ -173,6 +173,8 @@
     "categorizeHint": "카테고리를 지정하려면 중립이 아닌 현금 흐름 그룹에서 거래를 선택하세요",
     "tagEvent": "이벤트 태그",
     "deselect": "거래 선택 해제",
+    "bankText": "은행 적요: {{text}}",
+    "bankDescription": "은행 적요",
     "select": "거래 선택",
     "review": "검토",
     "neutral": "중립",
@@ -889,6 +891,8 @@
     "tagEventOptional": "이벤트 태그 (선택 사항)",
     "notesPayee": "메모 / 수취인",
     "notesPlaceholder": "예: AMAZON*MARKETPLACE, STARBUCKS COFFEE",
+    "bankDescription": "은행 적요",
+    "bankDescriptionHint": "가져온 그대로입니다. 메모 내용과 관계없이 규칙은 이 텍스트를 기준으로 적용됩니다.",
     "updateTransaction": "거래 업데이트",
     "createTransaction": "거래 생성",
     "typeChange": {

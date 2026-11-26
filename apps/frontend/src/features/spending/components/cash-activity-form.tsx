@@ -1106,6 +1106,8 @@ export function CashActivityForm({
     </FormItem>
   );
 
+  const bankDescription =
+    isEditing && activity?.importedDescription?.trim() ? activity.importedDescription : undefined;
   const notesField = (
     <FormField
       control={form.control}
@@ -1127,6 +1129,17 @@ export function CashActivityForm({
               {...field}
             />
           </FormControl>
+          {/* What the import received: shown, never edited, so the notes
+              above stay the user's to rewrite. */}
+          {bankDescription && (
+            <div className={cn("text-muted-foreground text-xs", isMobile && "px-4 pb-2")}>
+              <div className="font-medium">{t("spending:cashForm.bankDescription")}</div>
+              <div dir="auto" className="break-words rtl:text-right">
+                {bankDescription}
+              </div>
+              <div className="mt-0.5">{t("spending:cashForm.bankDescriptionHint")}</div>
+            </div>
+          )}
           <FormMessage className={cn(isMobile && "px-4 pb-2")} />
         </FormItem>
       )}
