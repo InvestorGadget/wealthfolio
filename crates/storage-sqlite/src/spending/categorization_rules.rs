@@ -1195,6 +1195,10 @@ mod tests {
         }));
     }
 
+    /// The repository writes the rule it is given, payee fields included.
+    /// Keeping a stored payee condition that an addon's upsert does not name
+    /// is the service's job (`an_addon_upsert_keeps_the_payee_fields_the_user_added`):
+    /// once it has merged them, a null here is a deliberate clear.
     #[tokio::test]
     async fn upsert_replaces_the_payee_fields_with_the_rest_of_the_rule() {
         let (repo, _dir) = setup_repo();

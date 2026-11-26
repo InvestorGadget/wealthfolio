@@ -458,30 +458,44 @@ mod tests {
     }
 
     #[test]
-    fn a_rule_with_no_condition_never_matches() {
-        // Neither text nor payee: an empty pattern is not "everything".
-        for (pattern, mt) in [
-            ("", RuleMatchType::Contains),
-            ("   ", RuleMatchType::StartsWith),
-            ("", RuleMatchType::Exact),
-            (
-                crate::categorization_rules::model::NO_TEXT_CONDITION_PATTERN,
-                RuleMatchType::Regex,
-            ),
-        ] {
-            let rules = vec![rule("empty", pattern, mt, 0)];
-            assert_eq!(matched(&rules, "anything", Some("payee-amazon")), None);
-            assert_eq!(matched(&rules, "", None), None);
-        }
+    fn the_placeholder_without_a_payee_condition_never_matches() {
+        // Neither text nor payee: the placeholder alone is no condition, not
+        // "everything".
+        let rules = vec![rule(
+            "empty",
+            crate::categorization_rules::model::NO_TEXT_CONDITION_PATTERN,
+            RuleMatchType::Regex,
+            0,
+        )];
+        assert_eq!(matched(&rules, "anything", Some("payee-amazon")), None);
+        assert_eq!(matched(&rules, "", None), None);
     }
 
     #[test]
-    fn an_empty_pattern_beside_a_payee_condition_is_no_text_condition() {
-        let mut r = rule("payee", "", RuleMatchType::Exact, 0);
-        r.payee_condition_id = Some("payee-amazon".to_string());
+    fn a_legacy_empty_pattern_still_matches_everything_in_its_scope() {
+        // Earlier versions saved catch-all rules (one account, one activity
+        // type) with an empty pattern. They keep their meaning.
+        let mut catch_all = rule("catch-all", "", RuleMatchType::Contains, 0);
+        catch_all.activity_type = Some("WITHDRAWAL".to_string());
+        let starts = rule("starts", "  ", RuleMatchType::StartsWith, 0);
         assert_eq!(
-            matched(&[r], "not empty", Some("payee-amazon")),
-            Some("payee".to_string())
+            matched(std::slice::from_ref(&catch_all), "anything", None),
+            Some("catch-all".to_string())
+        );
+        assert_eq!(
+            matched(std::slice::from_ref(&catch_all), "", None),
+            Some("catch-all".to_string())
+        );
+        catch_all.activity_type = Some("DEPOSIT".to_string());
+        assert_eq!(matched(&[catch_all], "anything", None), None);
+        // Blank text is matched as written, like any other text.
+        assert_eq!(
+            matched(std::slice::from_ref(&starts), "anything", None),
+            None
+        );
+        assert_eq!(
+            matched(&[starts], "  anything", None),
+            Some("starts".to_string())
         );
     }
 

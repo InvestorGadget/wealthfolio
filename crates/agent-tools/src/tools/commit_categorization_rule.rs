@@ -37,8 +37,10 @@ fn validate_draft(rule: &NewCategorizationRule) -> Result<(), AgentToolError> {
             "rule.id from create_categorization_rule is required".to_string(),
         ));
     }
-    // A rule that matches on a payee can go without a text condition.
-    let has_text_condition = is_text_condition(rule.match_type, &rule.pattern);
+    // A rule that matches on a payee can go without a text condition. A new
+    // rule's empty pattern is none either (it would match every activity).
+    let has_text_condition =
+        is_text_condition(rule.match_type, &rule.pattern) && !rule.pattern.trim().is_empty();
     if !has_text_condition && rule.payee_condition_id.is_none() {
         return Err(AgentToolError::InvalidInput(
             "rule.pattern cannot be empty".to_string(),

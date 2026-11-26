@@ -54,7 +54,9 @@ impl CategorizationRulesService {
     }
     pub async fn create(&self, mut new_rule: NewCategorizationRule) -> Result<CategorizationRule> {
         validate_rule_scope(new_rule.is_global, new_rule.account_id.as_deref())?;
-        normalize_new_rule_conditions(&mut new_rule)?;
+        // A new rule needs a condition; only rules saved by earlier versions
+        // may have an empty pattern.
+        normalize_new_rule_conditions(&mut new_rule, false)?;
         self.ensure_payees_exist([&new_rule.payee_condition_id, &new_rule.set_payee_id])
             .await?;
         // Normalize before validating: values without an operator are dropped,
@@ -102,11 +104,22 @@ impl CategorizationRulesService {
         {
             *value = non_blank(value.take());
         }
-        let new_match_type = patch.match_type.unwrap_or(existing.match_type);
-        let new_pattern = patch
-            .pattern
-            .as_deref()
-            .unwrap_or(existing.pattern.as_str());
+        // A rule without a text condition has no match type of its own: the
+        // placeholder is stored as a regex. A patch that gives it a text
+        // without naming a match type gets `contains`, like a new rule, and
+        // one that only names a match type leaves it without a text.
+        let (new_match_type, new_pattern) = match patch.pattern.as_deref() {
+            Some(pattern) if !existing.has_text_condition() => {
+                (patch.match_type.unwrap_or(RuleMatchType::Contains), pattern)
+            }
+            None if !existing.has_text_condition() => {
+                (existing.match_type, existing.pattern.as_str())
+            }
+            pattern => (
+                patch.match_type.unwrap_or(existing.match_type),
+                pattern.unwrap_or(existing.pattern.as_str()),
+            ),
+        };
         let new_taxonomy = match &patch.taxonomy_id {
             Some(value) => value.as_deref(),
             None => existing.taxonomy_id.as_deref(),
@@ -130,6 +143,9 @@ impl CategorizationRulesService {
             new_category,
             new_payee_condition,
             new_set_payee,
+            // An empty pattern an earlier version saved can stay; a patch
+            // cannot newly leave a rule with nothing to match on.
+            existing.pattern.trim().is_empty(),
         )?;
         // Only a payee the patch newly names is looked up: a rule whose payee
         // has since gone can still be edited, and matches nothing meanwhile.
@@ -145,12 +161,8 @@ impl CategorizationRulesService {
             &changed_payee(&patch.set_payee_id, &existing.set_payee_id),
         ])
         .await?;
-        if stored_match_type != new_match_type {
-            patch.match_type = Some(stored_match_type);
-        }
-        if stored_pattern != new_pattern {
-            patch.pattern = Some(stored_pattern);
-        }
+        patch.match_type = Some(stored_match_type);
+        patch.pattern = Some(stored_pattern);
 
         // Resolve the post-patch amount condition, normalize it (clearing the
         // operator clears both values; only `between` keeps an upper value),
@@ -194,7 +206,7 @@ impl CategorizationRulesService {
             .into());
         }
         validate_rule_scope(proposed.is_global, proposed.account_id.as_deref())?;
-        normalize_new_rule_conditions(&mut proposed)?;
+        normalize_new_rule_conditions(&mut proposed, expected.pattern.trim().is_empty())?;
         let changed_payee = |proposed: &Option<String>, stored: &Option<String>| {
             proposed.clone().filter(|_| proposed != stored)
         };
@@ -235,11 +247,28 @@ impl CategorizationRulesService {
     /// meant for callers (e.g. the addon bridge) that derive a stable id up
     /// front and need create-or-update to be race-free against itself,
     /// including when the same id is submitted twice in quick succession.
+    ///
+    /// The addon SDK cannot express a rule's payee fields, so an upsert that
+    /// names neither keeps the ones the stored rule has: a payee condition the
+    /// user added must not be dropped, which would widen the rule. The merged
+    /// rule is validated as a whole; an addon's text beside a stored payee
+    /// condition matches on both. Like earlier versions, an upsert may keep an
+    /// empty pattern.
     pub async fn upsert(&self, mut new_rule: NewCategorizationRule) -> Result<CategorizationRule> {
         validate_rule_scope(new_rule.is_global, new_rule.account_id.as_deref())?;
-        normalize_new_rule_conditions(&mut new_rule)?;
+        new_rule.payee_condition_id = non_blank(new_rule.payee_condition_id.take());
+        new_rule.set_payee_id = non_blank(new_rule.set_payee_id.take());
         self.ensure_payees_exist([&new_rule.payee_condition_id, &new_rule.set_payee_id])
             .await?;
+        if new_rule.payee_condition_id.is_none() && new_rule.set_payee_id.is_none() {
+            if let Some(id) = new_rule.id.as_deref() {
+                if let Some(stored) = self.repo.get(id).await? {
+                    new_rule.payee_condition_id = stored.payee_condition_id;
+                    new_rule.set_payee_id = stored.set_payee_id;
+                }
+            }
+        }
+        normalize_new_rule_conditions(&mut new_rule, true)?;
         if new_rule.amount_op.is_none() {
             new_rule.amount_value = None;
             new_rule.amount_value2 = None;
@@ -557,6 +586,9 @@ pub fn validate_rule_input(rule: &NewCategorizationRule) -> Result<()> {
         rule.category_id.as_deref(),
         non_blank(rule.payee_condition_id.clone()).as_deref(),
         non_blank(rule.set_payee_id.clone()).as_deref(),
+        // Whether the pattern may be empty depends on the rule it edits; the
+        // service checks that against the stored rule.
+        true,
     )?;
     validate_rule_amount(rule.amount_op, rule.amount_value, rule.amount_value2)
 }
@@ -567,7 +599,10 @@ fn non_blank(value: Option<String>) -> Option<String> {
 
 /// Validate a whole new rule's conditions and payee fields, and give it the
 /// pattern it is stored with (see [`resolve_rule_conditions`]).
-fn normalize_new_rule_conditions(rule: &mut NewCategorizationRule) -> Result<()> {
+fn normalize_new_rule_conditions(
+    rule: &mut NewCategorizationRule,
+    empty_pattern_allowed: bool,
+) -> Result<()> {
     rule.payee_condition_id = non_blank(rule.payee_condition_id.take());
     rule.set_payee_id = non_blank(rule.set_payee_id.take());
     let (match_type, pattern) = resolve_rule_conditions(
@@ -577,6 +612,7 @@ fn normalize_new_rule_conditions(rule: &mut NewCategorizationRule) -> Result<()>
         rule.category_id.as_deref(),
         rule.payee_condition_id.as_deref(),
         rule.set_payee_id.as_deref(),
+        empty_pattern_allowed,
     )?;
     rule.match_type = match_type;
     rule.pattern = pattern;
@@ -586,9 +622,15 @@ fn normalize_new_rule_conditions(rule: &mut NewCategorizationRule) -> Result<()>
 /// Validate what a rule matches on and which payee it may set, and return the
 /// `(match_type, pattern)` to store.
 ///
-/// - A rule needs a text condition or a payee condition. With only a payee
-///   condition it is stored as a regex with [`NO_TEXT_CONDITION_PATTERN`], so
-///   a version that does not know payee conditions never matches it.
+/// - A rule needs a text condition or a payee condition. With a payee
+///   condition and an empty text it is stored as a regex with
+///   [`NO_TEXT_CONDITION_PATTERN`], so a version that does not know payee
+///   conditions never matches it. That placeholder without a payee condition
+///   is refused.
+/// - An empty text without a payee condition matches every activity in the
+///   rule's scope. Earlier versions saved such rules, so they stay valid
+///   where `empty_pattern_allowed` (an edit of one, an upsert); a new rule
+///   cannot have one.
 /// - A rule that matches on a payee cannot set one: the payee pass runs
 ///   before payees are known, so such a rule could never fire there.
 /// - Only a rule that targets a category can also set a payee; a payee rule
@@ -600,6 +642,7 @@ fn resolve_rule_conditions(
     category_id: Option<&str>,
     payee_condition_id: Option<&str>,
     set_payee_id: Option<&str>,
+    empty_pattern_allowed: bool,
 ) -> Result<(RuleMatchType, String)> {
     let invalid = |message: &str| -> anyhow::Error {
         SpendingError::InvalidInput {
@@ -619,16 +662,20 @@ fn resolve_rule_conditions(
             "Only a rule that sets a category can also set a payee",
         ));
     }
-    if is_text_condition(match_type, pattern) {
+    let no_text = !is_text_condition(match_type, pattern) || pattern.trim().is_empty();
+    if !no_text {
         validate_rule_pattern(&match_type, pattern)?;
         return Ok((match_type, pattern.to_string()));
     }
-    if payee_condition_id.is_none() {
-        return Err(invalid(
-            "A rule needs a text condition or a payee condition",
-        ));
+    if payee_condition_id.is_some() {
+        return Ok((RuleMatchType::Regex, NO_TEXT_CONDITION_PATTERN.to_string()));
     }
-    Ok((RuleMatchType::Regex, NO_TEXT_CONDITION_PATTERN.to_string()))
+    if empty_pattern_allowed && is_text_condition(match_type, pattern) {
+        return Ok((match_type, pattern.to_string()));
+    }
+    Err(invalid(
+        "A rule needs a text condition or a payee condition",
+    ))
 }
 
 fn validate_rule_pattern(match_type: &RuleMatchType, pattern: &str) -> Result<()> {
@@ -2740,14 +2787,18 @@ mod tests {
         assert!(err
             .to_string()
             .contains("text condition or a payee condition"));
-        empty.id = Some("explicit".to_string());
-        assert!(svc.upsert(empty).await.is_err());
 
-        // The placeholder without a payee condition is no condition either.
+        // The placeholder without a payee condition is no condition either,
+        // wherever it comes from.
         let mut placeholder = base_new_rule();
         placeholder.pattern = NO_TEXT_CONDITION_PATTERN.to_string();
         placeholder.match_type = RuleMatchType::Regex;
-        assert!(svc.create(placeholder).await.is_err());
+        let err = svc.create(placeholder.clone()).await.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("text condition or a payee condition"));
+        placeholder.id = Some("placeholder".to_string());
+        assert!(svc.upsert(placeholder).await.is_err());
 
         // Removing the payee condition of a payee-only rule leaves nothing.
         let mut payee_only = base_new_rule();
@@ -2902,5 +2953,209 @@ mod tests {
         assert_eq!(updated.name, "renamed");
         assert_eq!(updated.payee_condition_id.as_deref(), Some("payee_amazon"));
         assert_eq!(updated.pattern, "AMZN");
+    }
+
+    // ----- rules saved by earlier versions, addon upserts, partial patches --
+
+    #[tokio::test]
+    async fn a_legacy_empty_pattern_rule_still_matches_its_scope() {
+        let mut catch_all = mk_rule("catch-all", "", "spending_categories", "cat_misc", 0);
+        catch_all.account_id = Some("acct1".to_string());
+        catch_all.is_global = false;
+        let (svc, _, assignments) = mk_payee_svc(
+            vec![catch_all],
+            vec![
+                mk_activity("in-scope", "acct1", "ANYTHING"),
+                mk_activity("no-notes", "acct1", ""),
+                mk_activity("other-account", "acct2", "ANYTHING"),
+            ],
+            vec![],
+        );
+
+        let summary = svc
+            .rerun_detailed(&["acct1".to_string(), "acct2".to_string()], true)
+            .await
+            .unwrap();
+        assert_eq!(summary.matched, 2);
+        assert_eq!(
+            applied(&assignments),
+            vec![
+                row("in-scope", "spending_categories", "cat_misc"),
+                row("no-notes", "spending_categories", "cat_misc"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_legacy_empty_pattern_rule_can_still_be_edited() {
+        let legacy = mk_rule("legacy", "", "spending_categories", "cat_misc", 0);
+        let (svc, _, _) = mk_svc(vec![legacy.clone()], vec![]);
+
+        let renamed = svc
+            .update(
+                "legacy",
+                UpdateCategorizationRule {
+                    name: Some("Everything else".to_string()),
+                    priority: Some(3),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(renamed.name, "Everything else");
+        assert_eq!(renamed.priority, 3);
+        assert_eq!(renamed.pattern, "");
+        assert_eq!(renamed.match_type, RuleMatchType::Contains);
+
+        // The form sends the pattern with every save: the same empty one.
+        let saved = svc
+            .update(
+                "legacy",
+                UpdateCategorizationRule {
+                    pattern: Some(String::new()),
+                    match_type: Some(RuleMatchType::Contains),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(saved.pattern, "");
+
+        // An upsert keeps it valid too, as earlier versions did.
+        let mut upserted: NewCategorizationRule =
+            serde_json::from_value(serde_json::to_value(&saved).unwrap()).unwrap();
+        upserted.priority = 4;
+        assert_eq!(svc.upsert(upserted).await.unwrap().priority, 4);
+
+        // A reviewed edit of it, likewise.
+        let current = svc.get("legacy").await.unwrap().unwrap();
+        let mut proposed: NewCategorizationRule =
+            serde_json::from_value(serde_json::to_value(&current).unwrap()).unwrap();
+        proposed.name = "Catch-all".to_string();
+        assert_eq!(
+            svc.update_reviewed(current, proposed).await.unwrap().name,
+            "Catch-all"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_patch_cannot_newly_empty_a_rules_pattern() {
+        let (svc, _, _) = mk_svc(
+            vec![mk_rule(
+                "text",
+                "AMZN",
+                "spending_categories",
+                "cat_misc",
+                0,
+            )],
+            vec![],
+        );
+        let err = svc
+            .update(
+                "text",
+                UpdateCategorizationRule {
+                    pattern: Some("  ".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("text condition or a payee condition"));
+        assert_eq!(svc.get("text").await.unwrap().unwrap().pattern, "AMZN");
+    }
+
+    #[tokio::test]
+    async fn a_patch_of_a_payee_only_rule_reads_its_text_as_new() {
+        let (svc, _, _) = mk_svc(
+            vec![mk_payee_condition_rule(
+                "by-payee",
+                "payee_amazon",
+                "cat_shopping",
+                0,
+            )],
+            vec![],
+        );
+
+        // A match type alone gives it no text: it stays payee-only.
+        let typed = svc
+            .update(
+                "by-payee",
+                UpdateCategorizationRule {
+                    match_type: Some(RuleMatchType::Contains),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(typed.match_type, RuleMatchType::Regex);
+        assert_eq!(typed.pattern, NO_TEXT_CONDITION_PATTERN);
+
+        // A text alone is matched as `contains`, not as the placeholder's regex.
+        let texted = svc
+            .update(
+                "by-payee",
+                UpdateCategorizationRule {
+                    pattern: Some("Prime".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(texted.match_type, RuleMatchType::Contains);
+        assert_eq!(texted.pattern, "Prime");
+        assert_eq!(texted.payee_condition_id.as_deref(), Some("payee_amazon"));
+    }
+
+    #[tokio::test]
+    async fn an_addon_upsert_keeps_the_payee_fields_the_user_added() {
+        let mut stored = mk_payee_condition_rule("addon:x:r", "payee_amazon", "cat_shopping", 0);
+        stored.name = "Addon rule".to_string();
+        let mut setter = mk_rule("addon:x:s", "BAKERY", "spending_categories", "cat_food", 0);
+        setter.set_payee_id = Some("payee_bakery".to_string());
+        let (svc, _, _) = mk_svc(vec![stored, setter], vec![]);
+
+        // What the addon bridge sends: no payee fields at all.
+        let addon_rule = |id: &str, pattern: &str, category: &str| NewCategorizationRule {
+            id: Some(id.to_string()),
+            pattern: pattern.to_string(),
+            category_id: Some(category.to_string()),
+            ..base_new_rule()
+        };
+
+        // The addon's text joins the payee condition: narrower, never wider.
+        let narrowed = svc
+            .upsert(addon_rule("addon:x:r", "PRIME", "cat_shopping"))
+            .await
+            .unwrap();
+        assert_eq!(narrowed.payee_condition_id.as_deref(), Some("payee_amazon"));
+        assert_eq!(narrowed.pattern, "PRIME");
+        assert_eq!(narrowed.match_type, RuleMatchType::Contains);
+
+        // An empty addon text leaves it payee-only.
+        let payee_only = svc
+            .upsert(addon_rule("addon:x:r", "", "cat_shopping"))
+            .await
+            .unwrap();
+        assert_eq!(
+            payee_only.payee_condition_id.as_deref(),
+            Some("payee_amazon")
+        );
+        assert_eq!(payee_only.pattern, NO_TEXT_CONDITION_PATTERN);
+
+        let kept = svc
+            .upsert(addon_rule("addon:x:s", "BAKERY CO", "cat_food"))
+            .await
+            .unwrap();
+        assert_eq!(kept.set_payee_id.as_deref(), Some("payee_bakery"));
+        assert_eq!(kept.pattern, "BAKERY CO");
+
+        // An upsert that names a payee field replaces both.
+        let mut named = addon_rule("addon:x:s", "BAKERY CO", "cat_food");
+        named.set_payee_id = Some("payee_netflix".to_string());
+        let replaced = svc.upsert(named).await.unwrap();
+        assert_eq!(replaced.set_payee_id.as_deref(), Some("payee_netflix"));
+        assert_eq!(replaced.payee_condition_id, None);
     }
 }

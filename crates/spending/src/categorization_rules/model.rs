@@ -81,11 +81,12 @@ impl RuleAmountOp {
 pub const NO_TEXT_CONDITION_PATTERN: &str = "(?!)";
 
 /// Whether a stored `(match_type, pattern)` pair is a text condition at all.
-/// The placeholder above is none, and neither is an empty pattern: `contains
-/// ""` holds for every activity, which is a missing condition, not a broad one.
+/// Only the placeholder above is none. An empty pattern stays the text
+/// condition it always was (`contains ""` holds for every activity): rules
+/// saved that way by earlier versions are catch-alls for their account or
+/// activity type, and keep matching as such.
 pub fn is_text_condition(match_type: RuleMatchType, pattern: &str) -> bool {
-    !pattern.trim().is_empty()
-        && !(match_type == RuleMatchType::Regex && pattern == NO_TEXT_CONDITION_PATTERN)
+    !(match_type == RuleMatchType::Regex && pattern == NO_TEXT_CONDITION_PATTERN)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -298,13 +299,14 @@ mod tests {
     }
 
     #[test]
-    fn the_placeholder_and_an_empty_pattern_are_no_text_condition() {
+    fn only_the_placeholder_is_no_text_condition() {
         assert!(!is_text_condition(
             RuleMatchType::Regex,
             NO_TEXT_CONDITION_PATTERN
         ));
-        assert!(!is_text_condition(RuleMatchType::Contains, ""));
-        assert!(!is_text_condition(RuleMatchType::Exact, "  "));
+        // An empty pattern is a text condition that every text meets.
+        assert!(is_text_condition(RuleMatchType::Contains, ""));
+        assert!(is_text_condition(RuleMatchType::Exact, "  "));
         assert!(is_text_condition(RuleMatchType::Contains, "AMAZON"));
         // As plain text the placeholder is text like any other.
         assert!(is_text_condition(

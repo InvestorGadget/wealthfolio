@@ -11,11 +11,13 @@ import {
 } from "./rule-conditions";
 
 describe("hasTextCondition", () => {
-  it("reads the placeholder and an empty pattern as no text condition", () => {
+  it("reads only the placeholder as no text condition", () => {
     expect(hasTextCondition({ pattern: NO_TEXT_CONDITION_PATTERN, matchType: "regex" })).toBe(
       false,
     );
-    expect(hasTextCondition({ pattern: "  ", matchType: "contains" })).toBe(false);
+    // An earlier version's catch-all: a text every transaction meets.
+    expect(hasTextCondition({ pattern: "", matchType: "contains" })).toBe(true);
+    expect(hasTextCondition({ pattern: "  ", matchType: "contains" })).toBe(true);
     expect(hasTextCondition({ pattern: "AMAZON", matchType: "contains" })).toBe(true);
     // As plain text the placeholder is text like any other.
     expect(hasTextCondition({ pattern: NO_TEXT_CONDITION_PATTERN, matchType: "exact" })).toBe(true);
@@ -148,14 +150,14 @@ describe("storedTextCondition", () => {
     });
   });
 
-  it("stores an empty condition as an empty contains pattern", () => {
+  it("stores an empty list as an empty contains pattern, a blank text as typed", () => {
     expect(storedTextCondition({ mode: "any_exact", pattern: "", list: " \n" })).toEqual({
       pattern: "",
       matchType: "contains",
     });
-    expect(storedTextCondition({ mode: "regex", pattern: "  ", list: "" })).toEqual({
-      pattern: "",
-      matchType: "contains",
+    expect(storedTextCondition({ mode: "starts_with", pattern: "  ", list: "" })).toEqual({
+      pattern: "  ",
+      matchType: "starts_with",
     });
   });
 
@@ -172,6 +174,9 @@ describe("storedTextCondition", () => {
       { pattern: "(?i)^(?:AT\\&T|Disney\\+)$", matchType: "regex" as const },
       { pattern: "^AMZN.*", matchType: "regex" as const },
       { pattern: "AMZN", matchType: "starts_with" as const },
+      // Catch-alls an earlier version saved keep their meaning.
+      { pattern: "", matchType: "exact" as const },
+      { pattern: "  ", matchType: "starts_with" as const },
     ]) {
       expect(storedTextCondition(textConditionDraft(rule))).toEqual(rule);
     }

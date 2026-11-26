@@ -12,12 +12,14 @@ export const NO_TEXT_CONDITION_PATTERN = "(?!)";
 /** Mirrors `MAX_REGEX_PATTERN_LEN` in `wealthfolio_spending::categorization_rules`. */
 export const MAX_REGEX_PATTERN_LENGTH = 512;
 
-/** Whether the rule matches on the transaction's text at all. */
+/**
+ * Whether the rule matches on the transaction's text at all. Mirrors
+ * `is_text_condition`: only the placeholder is none. An empty pattern, which
+ * earlier versions saved for catch-all rules, is a text every transaction
+ * meets.
+ */
 export function hasTextCondition(rule: Pick<CategorizationRule, "pattern" | "matchType">): boolean {
-  return (
-    rule.pattern.trim() !== "" &&
-    !(rule.matchType === "regex" && rule.pattern === NO_TEXT_CONDITION_PATTERN)
-  );
+  return !(rule.matchType === "regex" && rule.pattern === NO_TEXT_CONDITION_PATTERN);
 }
 
 /** How a list of texts is matched: any of them somewhere in the notes, or as the whole of them. */
@@ -139,9 +141,11 @@ export const isAnyOfMode = (mode: TextConditionMode): mode is "any_contains" | "
   mode === "any_contains" || mode === "any_exact";
 
 /**
- * What is stored for the form's text condition. An empty one is sent as an
- * empty `contains` pattern: the server stores the placeholder for it when the
- * rule has a payee condition, and refuses the rule otherwise.
+ * What is stored for the form's text condition. A single text is sent as
+ * typed, under its match type, even when it is blank: the server stores the
+ * placeholder for a blank one when the rule has a payee condition, keeps the
+ * blank pattern of a rule an earlier version saved, and refuses it on any
+ * other rule. An empty list is sent as an empty `contains` pattern.
  */
 export function storedTextCondition(draft: TextConditionDraft): {
   pattern: string;
@@ -159,6 +163,5 @@ export function storedTextCondition(draft: TextConditionDraft): {
     };
   }
   // Kept as typed: a space around a fragment is part of what it matches.
-  if (draft.pattern.trim() === "") return { pattern: "", matchType: "contains" };
   return { pattern: draft.pattern, matchType: draft.mode };
 }
