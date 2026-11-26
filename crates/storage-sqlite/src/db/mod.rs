@@ -1615,6 +1615,57 @@ mod migration_tests {
         );
     }
 
+    #[test]
+    fn reverting_rule_payees_removes_the_rules_that_match_on_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join("rule-payees.db");
+        let access = DbAccess::plaintext(db_path.to_str().unwrap());
+        access.run_migrations().unwrap();
+        let mut conn = access.connect().unwrap();
+        conn.batch_execute(
+            "PRAGMA foreign_keys = OFF;
+             INSERT INTO spending_categorization_rules
+               (id, name, pattern, match_type, taxonomy_id, category_id, payee_condition_id, set_payee_id)
+             VALUES ('payee-only', 'By payee', '(?!)', 'regex', 'spending_categories', 'cat_groceries', 'payee_bakery', NULL),
+                    ('text-and-payee', 'Bread', 'BREAD', 'contains', 'spending_categories', 'cat_groceries', 'payee_bakery', NULL),
+                    ('also-sets', 'Bakery', 'BKRY', 'contains', 'spending_categories', 'cat_groceries', NULL, 'payee_bakery'),
+                    ('plain', 'Food', 'FOOD', 'contains', 'spending_categories', 'cat_groceries', NULL, NULL);",
+        )
+        .unwrap();
+
+        conn.batch_execute(include_str!(
+            "../../migrations/2026-11-26-000002_rule_payee_condition/down.sql"
+        ))
+        .unwrap();
+
+        // Without its payee condition "BREAD" would match every payee's bread.
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM spending_categorization_rules \
+                 WHERE id IN ('payee-only', 'text-and-payee')"
+            ),
+            0
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM spending_categorization_rules \
+                 WHERE id IN ('also-sets', 'plain')"
+            ),
+            2,
+            "a rule that only also set a payee keeps its text and category"
+        );
+        assert_eq!(
+            count(
+                &mut conn,
+                "SELECT COUNT(*) AS count FROM pragma_table_info('spending_categorization_rules') \
+                 WHERE name IN ('payee_condition_id', 'set_payee_id')"
+            ),
+            0
+        );
+    }
+
     /// Diesel keys pending migrations by version (the directory name before
     /// the first `_`), so two directories sharing a version silently skip one
     /// of them on every database that has not applied it yet.
