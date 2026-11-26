@@ -961,6 +961,7 @@ mod tests {
         Activity {
             id: id.to_string(),
             account_id: account.to_string(),
+            imported_description: None,
             asset_id: None,
             activity_type: "WITHDRAWAL".to_string(),
             activity_type_override: None,

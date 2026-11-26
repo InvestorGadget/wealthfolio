@@ -994,6 +994,7 @@ mod tests {
     /// A BTC transfer in recorded before its cost was known.
     fn btc_transfer_in() -> Activity {
         Activity {
+            imported_description: None,
             id: "btc-in".to_string(),
             account_id: "wallet".to_string(),
             asset_id: Some("btc-asset".to_string()),

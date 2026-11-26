@@ -245,6 +245,7 @@ mod tests {
 
     fn activity(id: &str, activity_type: &str, date: &str, amount: Decimal) -> Activity {
         Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: "account".to_string(),
             asset_id: None,

@@ -7,7 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 use wealthfolio_core::activities::{
-    Activity, ActivityStatus, ActivityUpdate, ActivityUpsert, CashLedgerActivity, NewActivity,
+    stored_imported_description, Activity, ActivityStatus, ActivityUpdate, ActivityUpsert,
+    CashLedgerActivity, NewActivity,
 };
 
 fn normalize_subtype_for_storage(subtype: Option<String>) -> Option<String> {
@@ -141,6 +142,11 @@ pub struct ActivityDB {
     // Audit
     pub created_at: String,
     pub updated_at: String,
+
+    /// The description an import received, as received. Written when an
+    /// import creates the row or finds it empty; no update changes it, so a
+    /// changeset without it leaves the column alone.
+    pub imported_description: Option<String>,
 }
 
 /// Model for activity details including related data
@@ -364,6 +370,7 @@ impl From<ActivityDetailsDB> for wealthfolio_core::activities::ActivityDetails {
             cash_balance: None,
             cash_balance_currency: None,
             cash_balance_scope: None,
+            imported_description: None,
         }
     }
 }
@@ -543,6 +550,7 @@ impl From<ActivityDB> for Activity {
 
             // Metadata
             notes: db.notes,
+            imported_description: db.imported_description,
             metadata,
 
             // Source identity
@@ -647,6 +655,9 @@ impl From<NewActivity> for ActivityDB {
             source_group_id: domain.source_group_id,
             idempotency_key: domain.idempotency_key,
             import_run_id: domain.import_run_id,
+            imported_description: stored_imported_description(
+                domain.imported_description.as_deref(),
+            ),
 
             // Sync flags
             is_user_modified: 0,
@@ -737,6 +748,8 @@ impl From<ActivityUpdate> for ActivityDB {
             source_group_id: None,
             idempotency_key: None,
             import_run_id: None,
+            // An update never carries one; the stored value is kept.
+            imported_description: None,
 
             // Sync flags - mark as user modified since this is an update
             is_user_modified: 1,
@@ -824,6 +837,9 @@ impl From<ActivityUpsert> for ActivityDB {
             source_group_id: domain.source_group_id,
             idempotency_key: domain.idempotency_key,
             import_run_id: domain.import_run_id,
+            imported_description: stored_imported_description(
+                domain.imported_description.as_deref(),
+            ),
 
             // Sync flags - sync activities are not user modified by default
             is_user_modified: 0,

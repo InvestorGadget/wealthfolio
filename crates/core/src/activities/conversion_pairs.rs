@@ -228,6 +228,7 @@ mod tests {
         group: Option<&str>,
     ) -> Activity {
         Activity {
+            imported_description: None,
             id: id.into(),
             account_id: account.into(),
             asset_id: Some(asset.into()),

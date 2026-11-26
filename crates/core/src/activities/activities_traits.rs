@@ -392,6 +392,17 @@ pub trait ActivityRepositoryTrait: Send + Sync {
         idempotency_keys: &[String],
     ) -> Result<HashMap<String, String>>;
 
+    /// Stores each `(activity_id, description)` as the activity's imported
+    /// description when it has none; a stored one is never replaced. Used
+    /// when an import meets an activity it already holds. Returns how many
+    /// were filled.
+    async fn fill_missing_imported_descriptions(
+        &self,
+        _descriptions: Vec<(String, String)>,
+    ) -> Result<usize> {
+        Ok(0)
+    }
+
     /// Upserts multiple activities (insert or update on conflict by ID or idempotency_key).
     /// Respects is_user_modified flag - skips updates to user-modified activities.
     ///

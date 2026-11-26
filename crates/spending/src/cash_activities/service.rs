@@ -1546,6 +1546,7 @@ mod tests {
         Activity {
             id: "activity-1".to_string(),
             account_id: "account-1".to_string(),
+            imported_description: None,
             asset_id: None,
             activity_type: activity_type.to_string(),
             activity_type_override: None,

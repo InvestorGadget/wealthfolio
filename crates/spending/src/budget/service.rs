@@ -2201,6 +2201,7 @@ mod tests {
     ) -> wealthfolio_core::activities::Activity {
         use wealthfolio_core::activities::{Activity, ActivityStatus};
         Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: account_id.to_string(),
             asset_id: None,

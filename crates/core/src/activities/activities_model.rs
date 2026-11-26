@@ -190,6 +190,10 @@ pub struct Activity {
 
     // Metadata
     pub notes: Option<String>,
+    /// The description the bank, broker or import file sent, kept as received.
+    /// Imports set it once; no edit changes it. None for manual entries.
+    #[serde(default)]
+    pub imported_description: Option<String>,
     #[serde(default)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>, // JSON blob
@@ -237,6 +241,26 @@ pub fn effective_activity_type<'a>(activity_type: &'a str, override_: Option<&'a
     type_override(override_).unwrap_or(activity_type)
 }
 
+/// The imported description an import stores: the text it received, as
+/// received, and none when blank.
+pub fn stored_imported_description(value: Option<&str>) -> Option<String> {
+    value
+        .filter(|text| !text.trim().is_empty())
+        .map(str::to_string)
+}
+
+/// The text that describes an activity to categorization: its imported
+/// description when not blank, else its notes when not blank.
+pub fn bank_text<'a>(
+    imported_description: Option<&'a str>,
+    notes: Option<&'a str>,
+) -> Option<&'a str> {
+    let non_blank = |text: &&str| !text.trim().is_empty();
+    imported_description
+        .filter(non_blank)
+        .or_else(|| notes.filter(non_blank))
+}
+
 impl Activity {
     /// Returns the effective activity type, respecting user overrides.
     /// This is what the compiler and calculator should use.
@@ -266,6 +290,12 @@ impl Activity {
                 .is_some_and(|value| !value.trim().is_empty())
         };
         !manual && (non_empty(&self.import_run_id) || non_empty(&self.source_record_id))
+    }
+
+    /// The text that describes this activity to categorization: the imported
+    /// description when the row has one, else the notes. Blank text is none.
+    pub fn bank_text(&self) -> Option<&str> {
+        bank_text(self.imported_description.as_deref(), self.notes.as_deref())
     }
 
     /// The explicit external-transfer marker (`metadata.flow.is_external`),
@@ -415,6 +445,11 @@ pub struct NewActivity {
     pub status: Option<ActivityStatus>,
     #[serde(alias = "comment")]
     pub notes: Option<String>,
+    /// The description an import received, stored as the activity's imported
+    /// description. Import paths set it in Rust; it is not read from a
+    /// request, so an activity created by hand has none.
+    #[serde(skip)]
+    pub imported_description: Option<String>,
     #[serde(
         default,
         deserialize_with = "decimal_input_format::deserialize_option_decimal"
@@ -1243,6 +1278,11 @@ pub struct ActivityDetails {
     pub cash_balance: Option<String>,
     pub cash_balance_currency: Option<String>,
     pub cash_balance_scope: Option<CashBalanceScope>,
+    /// The description the bank, broker or import file sent, as received;
+    /// `comment` is the user's notes. Last, so exports keep their column
+    /// positions.
+    #[serde(default)]
+    pub imported_description: Option<String>,
 }
 
 impl ActivityDetails {
@@ -1346,6 +1386,12 @@ pub struct ActivityImport {
     )]
     pub amount: Option<Decimal>,
     pub comment: Option<String>,
+    /// The description the bank or file gave this row, when the importer
+    /// writes its own text to `comment`. Stored as the activity's imported
+    /// description; a row without one stores its comment.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub imported_description: Option<String>,
     pub account_id: Option<String>,
     pub account_name: Option<String>,
     pub symbol_name: Option<String>,
@@ -2253,6 +2299,10 @@ pub struct ActivityUpsert {
     pub amount: Option<Decimal>,
     pub status: Option<ActivityStatus>,
     pub notes: Option<String>,
+    /// The description the provider sent. Stored when the activity is
+    /// created, and on a later sync only while the stored one is empty.
+    #[serde(default)]
+    pub imported_description: Option<String>,
     pub fx_rate: Option<Decimal>,
     pub metadata: Option<String>,
     pub needs_review: Option<bool>,
@@ -2394,6 +2444,13 @@ impl From<ActivityImport> for NewActivity {
             tax: import.tax,
             amount: import.amount,
             status,
+            imported_description: stored_imported_description(
+                import
+                    .imported_description
+                    .as_deref()
+                    .filter(|text| !text.trim().is_empty())
+                    .or(import.comment.as_deref()),
+            ),
             notes: import.comment,
             fx_rate: import.fx_rate,
             metadata,

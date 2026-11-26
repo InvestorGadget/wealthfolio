@@ -930,6 +930,7 @@ where
                     None,
                 );
                 upserts.push(ActivityUpsert {
+                    imported_description: None,
                     id: key.clone(),
                     account_id: account_id.clone(),
                     asset_id: Some(asset.id.clone()),

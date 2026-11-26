@@ -1616,6 +1616,7 @@ pub(crate) mod tests {
                 format!("test-id-{}", self.activities.lock().unwrap().len() + 1)
             });
             let activity = Activity {
+                imported_description: new_activity.imported_description.clone(),
                 id: generated_id,
                 account_id: new_activity.account_id,
                 asset_id,
@@ -1860,6 +1861,7 @@ pub(crate) mod tests {
                     .and_then(|metadata| serde_json::from_str(metadata).ok());
                 let activity_date = parse_test_activity_datetime(&new_activity.activity_date);
                 let row = Activity {
+                    imported_description: new_activity.imported_description.clone(),
                     id: new_activity.id.unwrap_or_else(|| "test-id".to_string()),
                     account_id: new_activity.account_id,
                     asset_id,
@@ -2013,6 +2015,23 @@ pub(crate) mod tests {
             }
             Ok(map)
         }
+        async fn fill_missing_imported_descriptions(
+            &self,
+            descriptions: Vec<(String, String)>,
+        ) -> Result<usize> {
+            let mut stored = self.activities.lock().unwrap();
+            let mut filled = 0;
+            for (activity_id, description) in descriptions {
+                if let Some(row) = stored
+                    .iter_mut()
+                    .find(|row| row.id == activity_id && row.imported_description.is_none())
+                {
+                    row.imported_description = Some(description);
+                    filled += 1;
+                }
+            }
+            Ok(filled)
+        }
         async fn bulk_upsert(
             &self,
             _activities: Vec<crate::activities::ActivityUpsert>,
@@ -2100,6 +2119,7 @@ pub(crate) mod tests {
 
     fn create_stored_activity(id: &str, account_id: &str, asset_id: Option<&str>) -> Activity {
         Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: account_id.to_string(),
             asset_id: asset_id.map(|s| s.to_string()),
@@ -2145,6 +2165,7 @@ pub(crate) mod tests {
 
     fn create_transfer_activity(seed: TransferActivitySeed<'_>) -> Activity {
         Activity {
+            imported_description: None,
             id: seed.id.to_string(),
             account_id: seed.account_id.to_string(),
             asset_id: seed.asset_id.map(str::to_string),
@@ -2277,6 +2298,7 @@ pub(crate) mod tests {
 
         let created = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: Some("transfer-1".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -2776,6 +2798,7 @@ pub(crate) mod tests {
 
         let created = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: None,
                 account_id: "acc-cad".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -2835,6 +2858,7 @@ pub(crate) mod tests {
 
         let created = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: None,
                 account_id: "acc-usd".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -3093,6 +3117,7 @@ pub(crate) mod tests {
 
         let created = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: None,
                 account_id: "acc-cad".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -3151,6 +3176,7 @@ pub(crate) mod tests {
 
         let created = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: None,
                 account_id: "acc-cad".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -3589,6 +3615,7 @@ pub(crate) mod tests {
         );
 
         let mut new_activity = NewActivity {
+            imported_description: None,
             id: Some("buy-attested".to_string()),
             account_id: "acc-usd".to_string(),
             asset: Some(AssetResolutionInput {
@@ -3655,6 +3682,7 @@ pub(crate) mod tests {
         );
 
         let mut new_activity = NewActivity {
+            imported_description: None,
             id: Some("buy-gross-attested".to_string()),
             account_id: "acc-usd".to_string(),
             asset: Some(AssetResolutionInput {
@@ -3722,6 +3750,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_sync(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("sync-buy".to_string()),
                     account_id: "acc-usd".to_string(),
                     asset: Some(AssetResolutionInput {
@@ -3789,6 +3818,7 @@ pub(crate) mod tests {
             let activities = [("XTSE", "CAD"), ("XNYS", "USD")]
                 .into_iter()
                 .map(|(mic, currency)| NewActivity {
+                    imported_description: None,
                     id: Some(format!("buy-{mic}")),
                     account_id: account.id.clone(),
                     asset: Some(AssetResolutionInput {
@@ -3879,6 +3909,7 @@ pub(crate) mod tests {
                 Arc::new(MockQuoteService),
             );
             let activity = NewActivity {
+                imported_description: None,
                 id: Some("bond-buy".to_string()),
                 account_id: "acc-usd".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -3956,6 +3987,7 @@ pub(crate) mod tests {
 
     fn broker_buy(account_id: &str, symbol: &str, currency: &str) -> NewActivity {
         NewActivity {
+            imported_description: None,
             id: None,
             account_id: account_id.to_string(),
             asset: Some(AssetResolutionInput {
@@ -4302,6 +4334,7 @@ pub(crate) mod tests {
         );
         let isin = crate::utils::cusip::cusip_to_isin("135087D27", "CA");
         let make_activity = |symbol: &str| NewActivity {
+            imported_description: None,
             id: None,
             account_id: account.id.clone(),
             asset: Some(AssetResolutionInput {
@@ -4375,6 +4408,7 @@ pub(crate) mod tests {
 
         let created = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: Some("bond-buy".to_string()),
                 account_id: "acc-bonds".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -4427,6 +4461,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_sync(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("sync-mini-buy".to_string()),
                     account_id: "acc-cad".to_string(),
                     asset: Some(AssetResolutionInput {
@@ -4496,6 +4531,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_sync(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("sync-gross-buy".to_string()),
                     account_id: "acc-usd".to_string(),
                     asset: Some(AssetResolutionInput {
@@ -4810,6 +4846,7 @@ pub(crate) mod tests {
     /// 51,404.797528, which the broker's statement books as 51,404.80.
     fn statement_buy(id: &str, amount: Option<Decimal>, fee: Decimal) -> NewActivity {
         NewActivity {
+            imported_description: None,
             id: Some(id.to_string()),
             account_id: "acc-final".to_string(),
             asset: Some(AssetResolutionInput {
@@ -5246,6 +5283,7 @@ pub(crate) mod tests {
             Arc::new(MockQuoteService),
         );
         let row = |line: i32, asset_id: &str, symbol: &str, quantity, unit_price| ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-07-15".to_string(),
             symbol: symbol.to_string(),
@@ -6484,6 +6522,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("split-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -6541,6 +6580,7 @@ pub(crate) mod tests {
         .with_event_sink(event_sink.clone());
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("split-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -6692,6 +6732,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "card-1".to_string(),
             asset: None,
@@ -6999,6 +7040,7 @@ pub(crate) mod tests {
         quantity: Option<Decimal>,
     ) -> ActivityImport {
         ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: symbol.to_string(),
@@ -7266,6 +7308,7 @@ pub(crate) mod tests {
         currency: &str,
     ) -> NewActivity {
         NewActivity {
+            imported_description: None,
             id: Some(id.to_string()),
             account_id: account_id.to_string(),
             asset: None,
@@ -7536,6 +7579,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_sync(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("card-buy".to_string()),
                     account_id: "card-1".to_string(),
                     asset: Some(AssetResolutionInput {
@@ -7611,6 +7655,7 @@ pub(crate) mod tests {
 
         // Create activity with USD currency (same as account) but for EUR asset
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -7685,6 +7730,7 @@ pub(crate) mod tests {
 
         // Create activity with EUR currency (different from account USD)
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -7750,6 +7796,7 @@ pub(crate) mod tests {
         );
 
         let duplicate_activity = NewActivity {
+            imported_description: None,
             id: None,
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -7815,6 +7862,7 @@ pub(crate) mod tests {
         );
 
         let taxable_activity = NewActivity {
+            imported_description: None,
             id: None,
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -7892,6 +7940,7 @@ pub(crate) mod tests {
         );
 
         let trade = NewActivity {
+            imported_description: None,
             id: None,
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -7963,6 +8012,7 @@ pub(crate) mod tests {
         );
 
         let provider_activity_one = NewActivity {
+            imported_description: None,
             id: None,
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -8024,6 +8074,7 @@ pub(crate) mod tests {
 
         let request = ActivityBulkMutationRequest {
             creates: vec![NewActivity {
+                imported_description: None,
                 id: Some("temp-1".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -8754,6 +8805,7 @@ pub(crate) mod tests {
 
         // Create activity with USD currency (same as account and asset)
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -8831,6 +8883,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -8900,6 +8953,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -8958,6 +9012,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-missing-quote".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -9016,6 +9071,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("staking-reward-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: None,
@@ -9076,6 +9132,7 @@ pub(crate) mod tests {
 
         let activity = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: Some("staking-reward-lowercase".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -9135,6 +9192,7 @@ pub(crate) mod tests {
 
         let activity = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: Some("staking-reward-negative".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -9191,6 +9249,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_sync(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("option-buy".to_string()),
                     account_id: "acc-1".to_string(),
                     asset: Some(AssetResolutionInput {
@@ -9252,6 +9311,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_import(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("gbp-tax-import".to_string()),
                     account_id: "acc-1".to_string(),
                     asset: Some(AssetResolutionInput {
@@ -9317,6 +9377,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_sync(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("staking-cash-only".to_string()),
                     account_id: "acc-1".to_string(),
                     asset: None,
@@ -9384,6 +9445,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_sync(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("activity-staking-sol".to_string()),
                     account_id: "acc-1".to_string(),
                     asset: Some(AssetResolutionInput {
@@ -9448,6 +9510,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_sync(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("staking-invalid-symbol".to_string()),
                     account_id: "acc-1".to_string(),
                     asset: Some(AssetResolutionInput {
@@ -9510,6 +9573,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_sync(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("interest-drip-label".to_string()),
                     account_id: "acc-1".to_string(),
                     asset: None,
@@ -9566,6 +9630,7 @@ pub(crate) mod tests {
         let result = activity_service
             .prepare_activities_for_sync(
                 vec![NewActivity {
+                    imported_description: None,
                     id: Some("credit-staking-label".to_string()),
                     account_id: "acc-1".to_string(),
                     asset: None,
@@ -9625,6 +9690,7 @@ pub(crate) mod tests {
 
         let request = ActivityBulkMutationRequest {
             creates: vec![NewActivity {
+                imported_description: None,
                 id: Some("temp-1".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -9704,6 +9770,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -9879,6 +9946,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-missing-asset".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -9944,6 +10012,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-aapl".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -10008,6 +10077,7 @@ pub(crate) mod tests {
 
         let created = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: Some("activity-btc-eur".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -10083,6 +10153,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-zaaa".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -10156,6 +10227,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-shop".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -10216,6 +10288,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-transient".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -10280,6 +10353,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: None,
@@ -10332,6 +10406,7 @@ pub(crate) mod tests {
 
         let created = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: Some("cash-adjustment".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: None,
@@ -10377,6 +10452,7 @@ pub(crate) mod tests {
 
         let error = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: Some("option-expiry".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: None,
@@ -10421,6 +10497,7 @@ pub(crate) mod tests {
 
             let error = activity_service
                 .create_activity(NewActivity {
+                    imported_description: None,
                     id: Some("cost-adjustment".to_string()),
                     account_id: "acc-1".to_string(),
                     asset: None,
@@ -10475,6 +10552,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: None,
@@ -10567,6 +10645,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: None, // No asset info
@@ -10629,6 +10708,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -10698,6 +10778,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -10768,6 +10849,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -10826,6 +10908,7 @@ pub(crate) mod tests {
 
         let created = activity_service
             .create_activity(NewActivity {
+                imported_description: None,
                 id: Some("activity-1".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -10895,6 +10978,7 @@ pub(crate) mod tests {
 
         // ETH would be inferred as crypto, but exchange_mic forces security
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -10966,6 +11050,7 @@ pub(crate) mod tests {
             );
 
             let new_activity = NewActivity {
+                imported_description: None,
                 id: Some(format!("activity-{}", activity_type)),
                 account_id: "acc-1".to_string(),
                 asset: None,
@@ -11036,6 +11121,7 @@ pub(crate) mod tests {
         // Create bulk mutation request
         let request = ActivityBulkMutationRequest {
             creates: vec![NewActivity {
+                imported_description: None,
                 id: Some("activity-1".to_string()),
                 account_id: "acc-1".to_string(),
                 asset: Some(AssetResolutionInput {
@@ -11113,6 +11199,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "AZN".to_string(),
@@ -11193,6 +11280,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-06-30".to_string(),
             symbol: "KWEB".to_string(),
@@ -11272,6 +11360,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-06-30".to_string(),
             symbol: "KWEB".to_string(),
@@ -11342,6 +11431,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-06-30".to_string(),
             symbol: "VOD.L".to_string(),
@@ -11419,6 +11509,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-06-30".to_string(),
             symbol: "VOD.L".to_string(),
@@ -11496,6 +11587,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-06-30".to_string(),
             symbol: "VOD.L".to_string(),
@@ -11583,6 +11675,7 @@ pub(crate) mod tests {
 
         let checked = activity_service
             .check_activities_import(vec![ActivityImport {
+                imported_description: None,
                 id: None,
                 date: "2026-07-15".to_string(),
                 symbol: "ZFL".to_string(),
@@ -11687,6 +11780,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "ZFL".to_string(),
@@ -11787,6 +11881,7 @@ pub(crate) mod tests {
 
         let imports = vec![
             ActivityImport {
+                imported_description: None,
                 id: None,
                 date: "2024-01-15".to_string(),
                 symbol: "SHOP".to_string(),
@@ -11826,6 +11921,7 @@ pub(crate) mod tests {
                 metadata: None,
             },
             ActivityImport {
+                imported_description: None,
                 id: None,
                 date: "2024-01-15".to_string(),
                 symbol: "SHOP".to_string(),
@@ -11913,6 +12009,7 @@ pub(crate) mod tests {
         );
 
         let nyse = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "SHOP".to_string(),
@@ -11987,6 +12084,7 @@ pub(crate) mod tests {
         );
 
         let first = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "XAU".to_string(),
@@ -12243,6 +12341,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "AZN".to_string(),
@@ -12321,6 +12420,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "MSF.DE".to_string(),
@@ -12392,6 +12492,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VOD.L".to_string(),
@@ -12470,6 +12571,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "BRK.B".to_string(),
@@ -12545,6 +12647,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "AZN".to_string(),
@@ -12617,6 +12720,7 @@ pub(crate) mod tests {
 
         // ".XC" suffix resolves to Cboe UK MIC and provider quote currency.
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VWRPL.XC".to_string(),
@@ -12695,6 +12799,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "CUSTOM".to_string(),
@@ -12761,6 +12866,7 @@ pub(crate) mod tests {
 
     fn no_exchange_fund_import(symbol: &str, provider_id: Option<&str>) -> ActivityImport {
         ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-10-01".to_string(),
             symbol: symbol.to_string(),
@@ -12931,6 +13037,7 @@ pub(crate) mod tests {
 
         // Import activity for earlier created manual asset without `quote_mode` set
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "CUSTOM".to_string(),
@@ -13007,6 +13114,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "BTC-USD".to_string(),
@@ -13079,6 +13187,7 @@ pub(crate) mod tests {
         );
 
         let unresolved = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VWRPL.XC".to_string(),
@@ -13202,6 +13311,7 @@ pub(crate) mod tests {
         );
 
         let drip = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: String::new(),
@@ -13276,6 +13386,7 @@ pub(crate) mod tests {
         );
 
         let dividend_in_kind = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: String::new(),
@@ -13350,6 +13461,7 @@ pub(crate) mod tests {
         );
 
         let staking_reward = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "ETH".to_string(),
@@ -13424,6 +13536,7 @@ pub(crate) mod tests {
         );
 
         let mismatched_subtype = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "AAPL".to_string(),
@@ -13495,6 +13608,7 @@ pub(crate) mod tests {
         );
 
         let option_buy = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "AAPL251219C00200000".to_string(),
@@ -13567,6 +13681,7 @@ pub(crate) mod tests {
         );
 
         let cash_dividend = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: String::new(),
@@ -13641,6 +13756,7 @@ pub(crate) mod tests {
         );
 
         let cash_dividend = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: String::new(),
@@ -13724,6 +13840,7 @@ pub(crate) mod tests {
         );
 
         let resolved = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VWRPL".to_string(),
@@ -13802,6 +13919,7 @@ pub(crate) mod tests {
         );
 
         let manual_row = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VWRPL".to_string(),
@@ -13889,6 +14007,7 @@ pub(crate) mod tests {
         );
 
         let invalid_date_row = ActivityImport {
+            imported_description: None,
             id: None,
             date: "1969-12-31".to_string(),
             symbol: "VWRPL".to_string(),
@@ -13968,6 +14087,7 @@ pub(crate) mod tests {
         );
 
         let cash_row = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: String::new(),
@@ -14043,6 +14163,7 @@ pub(crate) mod tests {
         );
 
         let activity = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-01-07".to_string(),
             symbol: String::new(),
@@ -14126,6 +14247,7 @@ pub(crate) mod tests {
         );
 
         let transfer_out = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2025-12-31".to_string(),
             symbol: String::new(),
@@ -14166,6 +14288,7 @@ pub(crate) mod tests {
         };
 
         let transfer_in = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2025-12-31T23:30:00-05:00".to_string(),
             symbol: String::new(),
@@ -14277,6 +14400,7 @@ pub(crate) mod tests {
         );
 
         let transfer_out = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2025-12-31".to_string(),
             symbol: String::new(),
@@ -14317,6 +14441,7 @@ pub(crate) mod tests {
         };
 
         let transfer_in = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2025-12-31".to_string(),
             symbol: String::new(),
@@ -14407,6 +14532,7 @@ pub(crate) mod tests {
         );
 
         let transfer_in = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-01-07".to_string(),
             symbol: String::new(),
@@ -14447,6 +14573,7 @@ pub(crate) mod tests {
         };
 
         let transfer_out = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-01-07".to_string(),
             symbol: String::new(),
@@ -14573,6 +14700,7 @@ pub(crate) mod tests {
         );
 
         let cash_transfer = |activity_type: &str, currency: &str, amount: Decimal| ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-01-07".to_string(),
             symbol: String::new(),
@@ -14670,6 +14798,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap()
             .push(Activity {
+                imported_description: None,
                 id: "existing-transfer-in".to_string(),
                 account_id: "acc-1".to_string(),
                 asset_id: None,
@@ -14710,6 +14839,7 @@ pub(crate) mod tests {
         );
 
         let transfer_out = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2025-12-31".to_string(),
             symbol: String::new(),
@@ -14750,6 +14880,7 @@ pub(crate) mod tests {
         };
 
         let transfer_in_duplicate = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2025-12-31".to_string(),
             symbol: String::new(),
@@ -16083,6 +16214,7 @@ pub(crate) mod tests {
             .with_timezone(&Utc);
         activity_repository.activities.lock().unwrap().extend([
             Activity {
+                imported_description: None,
                 id: "transfer-in".to_string(),
                 account_id: "acc-in".to_string(),
                 asset_id: Some("asset-in".to_string()),
@@ -16113,6 +16245,7 @@ pub(crate) mod tests {
                 updated_at: earlier,
             },
             Activity {
+                imported_description: None,
                 id: "transfer-out".to_string(),
                 account_id: "acc-out".to_string(),
                 asset_id: Some("asset-out".to_string()),
@@ -17733,6 +17866,7 @@ pub(crate) mod tests {
             Arc::new(MockQuoteService),
         );
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15T06:11:20+00:00".to_string(),
             symbol: "CUSTOM".to_string(),
@@ -17932,6 +18066,7 @@ pub(crate) mod tests {
         );
 
         let row = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VWRL".to_string(),
@@ -18010,6 +18145,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap()
             .push(Activity {
+                imported_description: None,
                 id: "existing-dup".to_string(),
                 account_id: "acc-1".to_string(),
                 asset_id: None,
@@ -18050,6 +18186,7 @@ pub(crate) mod tests {
         );
 
         let duplicate = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VWRL".to_string(),
@@ -18129,6 +18266,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VWRL".to_string(),
@@ -18232,6 +18370,7 @@ pub(crate) mod tests {
             .lock()
             .unwrap()
             .push(Activity {
+                imported_description: None,
                 id: "existing-dup".to_string(),
                 account_id: "acc-1".to_string(),
                 asset_id: None,
@@ -18272,6 +18411,7 @@ pub(crate) mod tests {
         );
 
         let forced = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VWRL".to_string(),
@@ -18368,6 +18508,7 @@ pub(crate) mod tests {
         );
 
         let base = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VWRL".to_string(),
@@ -18471,6 +18612,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "VWRL".to_string(),
@@ -18565,6 +18707,7 @@ pub(crate) mod tests {
 
         // User submits activity in GBp (pence) - 14082 pence per share
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -18657,6 +18800,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -18721,6 +18865,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -18785,6 +18930,7 @@ pub(crate) mod tests {
         );
 
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -18854,6 +19000,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-06-01".to_string(),
             symbol: "US912828ZT58".to_string(),
@@ -18927,6 +19074,7 @@ pub(crate) mod tests {
         );
 
         let resolved = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-06-01".to_string(),
             symbol: "US912828ZT58".to_string(),
@@ -19000,6 +19148,7 @@ pub(crate) mod tests {
 
         for alias in &["FIXEDINCOME", "FIXED_INCOME", "DEBT"] {
             let resolved = ActivityImport {
+                imported_description: None,
                 id: None,
                 date: "2024-06-01".to_string(),
                 symbol: "US912828ZT58".to_string(),
@@ -19085,6 +19234,7 @@ pub(crate) mod tests {
 
         // Import with explicit BOND instrument_type; name/ccy should be enriched from asset
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-06-01".to_string(),
             symbol: "US912828ZT58".to_string(),
@@ -19171,6 +19321,7 @@ pub(crate) mod tests {
 
         // AAPL Sep 18, 2026 $200 Call (OCC format)
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-03-01".to_string(),
             symbol: "AAPL260918C00200000".to_string(),
@@ -19245,6 +19396,7 @@ pub(crate) mod tests {
 
         // SPY June 19, 2026 $580 Put (OCC format)
         let resolved = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-03-01".to_string(),
             symbol: "SPY260619P00580000".to_string(),
@@ -19328,6 +19480,7 @@ pub(crate) mod tests {
         );
 
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-04-01".to_string(),
             symbol: "AAPL260918C00200000".to_string(),
@@ -19419,6 +19572,7 @@ pub(crate) mod tests {
 
         // OCC symbol with no explicit kind input — should be inferred as OPTION
         let new_activity = NewActivity {
+            imported_description: None,
             id: Some("activity-occ-1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -19488,6 +19642,7 @@ pub(crate) mod tests {
 
         activity_repository.activities.lock().unwrap().extend([
             Activity {
+                imported_description: None,
                 id: "transfer-out".to_string(),
                 account_id: "acc-out".to_string(),
                 asset_id: None,
@@ -19518,6 +19673,7 @@ pub(crate) mod tests {
                 updated_at: date_original,
             },
             Activity {
+                imported_description: None,
                 id: "transfer-in".to_string(),
                 account_id: "acc-in".to_string(),
                 asset_id: None,
@@ -19906,6 +20062,7 @@ pub(crate) mod tests {
 
         activity_repository.activities.lock().unwrap().extend([
             Activity {
+                imported_description: None,
                 id: "transfer-out".to_string(),
                 account_id: "acc-out".to_string(),
                 asset_id: None,
@@ -19936,6 +20093,7 @@ pub(crate) mod tests {
                 updated_at: date,
             },
             Activity {
+                imported_description: None,
                 id: "transfer-in".to_string(),
                 account_id: "acc-in".to_string(),
                 asset_id: None,
@@ -20003,6 +20161,7 @@ pub(crate) mod tests {
 
     fn qa_import_row(account_id: &str, activity_type: &str, currency: &str) -> ActivityImport {
         ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-02-01".to_string(),
             symbol: String::new(),
@@ -21856,6 +22015,7 @@ pub(crate) mod tests {
 
     fn page_row(id: &str, account_id: &str) -> ActivityDetails {
         ActivityDetails {
+            imported_description: None,
             id: id.to_string(),
             account_id: account_id.to_string(),
             asset_id: String::new(),
@@ -22353,6 +22513,7 @@ pub(crate) mod tests {
 
     fn conversion_row(id: &str, subtype: &str, asset: &str, quantity: Decimal) -> NewActivity {
         NewActivity {
+            imported_description: None,
             id: Some(id.into()),
             account_id: "acc-1".into(),
             asset: Some(AssetResolutionInput {
@@ -23417,6 +23578,7 @@ pub(crate) mod tests {
         charges: serde_json::Value,
     ) -> NewActivity {
         NewActivity {
+            imported_description: None,
             id: Some("charges-import".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -24133,6 +24295,7 @@ pub(crate) mod tests {
 
     fn transfer_in(asset: AssetResolutionInput) -> NewActivity {
         NewActivity {
+            imported_description: None,
             id: None,
             account_id: "acc-1".to_string(),
             asset: Some(asset),
@@ -24248,6 +24411,7 @@ pub(crate) mod tests {
 
     fn alternative_import_row(asset_id: Option<&str>, symbol: &str) -> ActivityImport {
         ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-10-02".to_string(),
             symbol: symbol.to_string(),
@@ -24374,5 +24538,135 @@ pub(crate) mod tests {
             "no property created"
         );
         assert!(quote_service.updated_quotes().is_empty(), "nothing priced");
+    }
+
+    // ───────────────────────────────────────────────────────────────────
+    // Imported description: the text an import received, kept apart from
+    // the notes the user may edit.
+    // ───────────────────────────────────────────────────────────────────
+
+    fn bank_row(comment: Option<&str>) -> ActivityImport {
+        let mut row = qa_import_row("qa-acc", "WITHDRAWAL", "USD");
+        row.amount = Some(dec!(42.50));
+        row.comment = comment.map(str::to_string);
+        row
+    }
+
+    #[tokio::test]
+    async fn import_stores_the_text_it_received_as_the_imported_description() {
+        let (service, repository, _) = qa_import_service("USD", vec![]);
+        let mut explicit = bank_row(Some("Groceries"));
+        explicit.date = "2024-02-02".to_string();
+        explicit.imported_description = Some("CARD 1234 TESCO STORES 3301".to_string());
+        let mut blank = bank_row(Some("   "));
+        blank.date = "2024-02-03".to_string();
+
+        let result = service
+            .import_activities(vec![bank_row(Some("TESCO STORES 3301")), explicit, blank])
+            .await
+            .expect("import");
+        assert_eq!(result.summary.imported, 3);
+
+        let stored = repository.get_activities().unwrap();
+        let by_date = |day: &str| {
+            stored
+                .iter()
+                .find(|row| row.activity_date.format("%Y-%m-%d").to_string() == day)
+                .unwrap_or_else(|| panic!("row of {day}"))
+        };
+        // A row without bank text of its own stores its comment.
+        let defaulted = by_date("2024-02-01");
+        assert_eq!(defaulted.notes.as_deref(), Some("TESCO STORES 3301"));
+        assert_eq!(
+            defaulted.imported_description.as_deref(),
+            Some("TESCO STORES 3301")
+        );
+        // An importer that writes its own comment sends the bank text apart.
+        let explicit = by_date("2024-02-02");
+        assert_eq!(explicit.notes.as_deref(), Some("Groceries"));
+        assert_eq!(
+            explicit.imported_description.as_deref(),
+            Some("CARD 1234 TESCO STORES 3301")
+        );
+        // Blank text is no description.
+        assert_eq!(by_date("2024-02-03").imported_description, None);
+    }
+
+    #[tokio::test]
+    async fn reimport_fills_an_empty_imported_description_and_keeps_a_stored_one() {
+        let (service, repository, _) = qa_import_service("USD", vec![]);
+        let mut second = bank_row(Some("SHELL 0042"));
+        second.date = "2024-02-02".to_string();
+        service
+            .import_activities(vec![bank_row(Some("TESCO STORES 3301")), second.clone()])
+            .await
+            .expect("first import");
+        {
+            // The first row as a client from before the column left it, with
+            // notes the user has since rewritten; the second as imported.
+            let mut stored = repository.activities.lock().unwrap();
+            let first = stored
+                .iter_mut()
+                .find(|row| row.notes.as_deref() == Some("TESCO STORES 3301"))
+                .unwrap();
+            first.imported_description = None;
+            first.notes = Some("Weekly shop".to_string());
+            let second = stored
+                .iter_mut()
+                .find(|row| row.notes.as_deref() == Some("SHELL 0042"))
+                .unwrap();
+            second.imported_description = Some("ORIGINAL SHELL TEXT".to_string());
+        }
+
+        let result = service
+            .import_activities(vec![bank_row(Some("TESCO STORES 3301")), second])
+            .await
+            .expect("re-import");
+        assert_eq!(result.summary.imported, 0);
+        assert_eq!(result.summary.duplicates, 2);
+
+        let stored = repository.get_activities().unwrap();
+        assert_eq!(stored.len(), 2);
+        let first = stored
+            .iter()
+            .find(|row| row.notes.as_deref() == Some("Weekly shop"))
+            .expect("the edited notes are untouched");
+        assert_eq!(
+            first.imported_description.as_deref(),
+            Some("TESCO STORES 3301")
+        );
+        let second = stored
+            .iter()
+            .find(|row| row.notes.as_deref() == Some("SHELL 0042"))
+            .unwrap();
+        assert_eq!(
+            second.imported_description.as_deref(),
+            Some("ORIGINAL SHELL TEXT")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_activity_created_by_hand_has_no_imported_description() {
+        let (service, repository, _) = qa_import_service("USD", vec![]);
+        // What a client sends; the field is not read from a request.
+        let request: NewActivity = serde_json::from_value(serde_json::json!({
+            "accountId": "qa-acc",
+            "activityType": "WITHDRAWAL",
+            "activityDate": "2024-02-01",
+            "currency": "USD",
+            "amount": "42.50",
+            "notes": "Lunch",
+            "importedDescription": "NOT FROM A BANK"
+        }))
+        .expect("request");
+        assert_eq!(request.imported_description, None);
+
+        let created = service.create_activity(request).await.expect("create");
+        assert_eq!(created.notes.as_deref(), Some("Lunch"));
+        assert_eq!(created.imported_description, None);
+        assert_eq!(
+            repository.get_activities().unwrap()[0].imported_description,
+            None
+        );
     }
 }

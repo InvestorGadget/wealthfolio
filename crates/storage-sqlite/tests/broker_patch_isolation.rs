@@ -170,6 +170,7 @@ async fn check_isolation(batched: bool, recreate: bool, replaced: bool, rollback
         let activity_repo = ActivityRepository::new(pool.clone(), writer);
         activity_repo
             .bulk_upsert(vec![ActivityUpsert {
+                imported_description: None,
                 id: "broker-local-activity-imported-later".to_string(),
                 account_id: "broker-local-account".to_string(),
                 asset_id: None,

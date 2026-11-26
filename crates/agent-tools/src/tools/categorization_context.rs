@@ -1001,6 +1001,7 @@ mod tests {
                 fx_rate: None,
                 notes: Some("test".to_string()),
                 metadata: None,
+                imported_description: None,
                 source_system: None,
                 source_record_id: None,
                 source_group_id: None,

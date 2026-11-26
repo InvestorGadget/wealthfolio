@@ -5,7 +5,9 @@ use serde_json::Value;
 use wealthfolio_core::errors::Result;
 use wealthfolio_core::sync::{SyncEntity, SyncOperation};
 
-use super::repository::{insert_outbox_event, OutboxWriteRequest};
+use super::repository::{
+    insert_outbox_event, split_imported_description_from_activity_payload, OutboxWriteRequest,
+};
 use crate::sync::SyncOutboxModel;
 
 /// Captured mutation that can be projected to a sync outbox request at commit-time.
@@ -75,8 +77,15 @@ pub(crate) fn flush_projected_outbox(
         } else {
             None
         };
+        // Old clients reject the activity column too; it follows its row in
+        // an event of its own, which they skip.
+        let imported_description = split_imported_description_from_activity_payload(&mut request);
         insert_outbox_event(conn, request)?;
         inserted_count += 1;
+        if let Some(imported_description) = imported_description {
+            insert_outbox_event(conn, imported_description)?;
+            inserted_count += 1;
+        }
         if let Some(mut versioned) = versioned {
             versioned.client_timestamp = chrono::Utc::now().to_rfc3339();
             insert_outbox_event(conn, versioned)?;

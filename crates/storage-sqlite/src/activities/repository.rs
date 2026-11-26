@@ -15,9 +15,9 @@ use uuid::Uuid;
 use wealthfolio_core::accounts::{account_supports_purpose, AccountPurpose};
 use wealthfolio_core::activities::ActivityError;
 use wealthfolio_core::activities::{
-    import_type, is_cash_symbol, stored_type_override, type_override, violates_final_cash_floor,
-    Activity, ActivityBulkIdentifierMapping, ActivityBulkMutationResult, ActivityDetails,
-    ActivityFinalCashMigrationUpdate, ActivityFinalCashMigrationWriteResult,
+    import_type, is_cash_symbol, stored_imported_description, stored_type_override, type_override,
+    violates_final_cash_floor, Activity, ActivityBulkIdentifierMapping, ActivityBulkMutationResult,
+    ActivityDetails, ActivityFinalCashMigrationUpdate, ActivityFinalCashMigrationWriteResult,
     ActivityRepositoryTrait, ActivitySearchResponse, ActivitySearchResponseMeta,
     ActivitySplitEffect, ActivityUpdate, ActivityUpsert, BulkUpsertResult, CashLedgerActivity,
     ImportMapping, ImportTemplate, IncomeData, NewActivity, Sort, ACTIVITY_TYPE_TRANSFER_IN,
@@ -39,6 +39,7 @@ use crate::schema::{
 use crate::spending::activity_assignments::ActivityTaxonomyAssignmentDB;
 use crate::spending::activity_splits::ActivitySplitDB;
 use crate::spending::activity_sync::should_sync_activity_local_id_outbox;
+use crate::sync::app_sync::imported_description_outbox_request;
 use crate::sync::broker_activity_patch::{
     apply_pending_broker_activity_user_patches_tx, broker_activity_identity,
     broker_activity_user_overlay_changed, broker_activity_user_patch_request,
@@ -231,6 +232,52 @@ fn is_broker_origin_activity(activity: &ActivityDB) -> bool {
             .is_some_and(|value| !value.trim().is_empty())
 }
 
+/// Stores `description` as the activity's imported description when it has
+/// none, and tells other devices when the activity itself syncs. A stored one
+/// is never replaced. Returns whether the row was filled.
+fn fill_missing_imported_description_tx(
+    tx: &mut crate::db::write_actor::DbWriteTx<'_>,
+    activity_id: &str,
+    description: Option<&str>,
+) -> Result<bool> {
+    let Some(description) = stored_imported_description(description) else {
+        return Ok(false);
+    };
+    let filled = diesel::update(
+        activities::table
+            .find(activity_id)
+            .filter(activities::imported_description.is_null()),
+    )
+    .set(activities::imported_description.eq(&description))
+    .execute(tx.conn())
+    .map_err(StorageError::from)?;
+    if filled == 0 {
+        return Ok(false);
+    }
+    let (source_system, is_user_modified, import_run_id, source_record_id) = activities::table
+        .find(activity_id)
+        .select((
+            activities::source_system,
+            activities::is_user_modified,
+            activities::import_run_id,
+            activities::source_record_id,
+        ))
+        .first::<(Option<String>, i32, Option<String>, Option<String>)>(tx.conn())
+        .map_err(StorageError::from)?;
+    if should_sync_outbox_for_activity(
+        source_system.as_deref(),
+        is_user_modified != 0,
+        import_run_id.as_deref(),
+        source_record_id.as_deref(),
+    ) {
+        tx.queue_outbox(imported_description_outbox_request(
+            activity_id,
+            &description,
+        ));
+    }
+    Ok(true)
+}
+
 fn should_sync_transfer_pair_raw_outbox(a: &ActivityDB, b: &ActivityDB) -> bool {
     if is_broker_origin_activity(a) || is_broker_origin_activity(b) {
         return false;
@@ -322,10 +369,13 @@ fn project_activity_update(
         tax,
         status,
         needs_review,
+        imported_description,
         ..
     } = existing;
 
     activity_to_update.created_at = created_at;
+    // The imported description is the import's, never an edit's.
+    activity_to_update.imported_description = imported_description;
     if !asset_patch_supplied {
         activity_to_update.asset_id = asset_id;
     }
@@ -893,7 +943,8 @@ impl ActivityRepository {
                         .or(assets::name.like(pattern.clone()))
                         .or(assets::display_code.like(pattern.clone()))
                         .or(activities::subtype.like(pattern.clone()))
-                        .or(activities::notes.like(pattern)),
+                        .or(activities::notes.like(pattern.clone()))
+                        .or(activities::imported_description.like(pattern)),
                 );
             }
             if let Some(needs_review) = needs_review_filter {
@@ -1015,34 +1066,43 @@ impl ActivityRepository {
                 ),
                 assets::metadata.nullable(),
                 assets::quote_ccy.nullable(),
+                activities::imported_description,
             ))
             .limit(page_size)
             .offset(offset)
-            .load::<(ActivityDetailsDB, Option<String>, Option<String>)>(&mut conn)
+            .load::<(
+                ActivityDetailsDB,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            )>(&mut conn)
             .map_err(StorageError::from)?;
 
         let results: Vec<ActivityDetails> = results_db
             .into_iter()
-            .map(|(db, asset_metadata, asset_quote_ccy)| {
-                let has_asset = db.asset_id.is_some();
-                let instrument_type = db
-                    .instrument_type
-                    .as_deref()
-                    .and_then(InstrumentType::from_db_str);
-                let asset_metadata: Option<serde_json::Value> = asset_metadata
-                    .as_deref()
-                    .and_then(|value| serde_json::from_str(value).ok());
-                let mut activity = ActivityDetails::from(db);
-                activity.asset_quote_ccy = asset_quote_ccy;
-                activity.asset_contract_multiplier = has_asset.then(|| {
-                    contract_multiplier_from_asset_metadata(
-                        instrument_type.as_ref(),
-                        asset_metadata.as_ref(),
-                    )
-                    .to_string()
-                });
-                activity
-            })
+            .map(
+                |(db, asset_metadata, asset_quote_ccy, imported_description)| {
+                    let has_asset = db.asset_id.is_some();
+                    let instrument_type = db
+                        .instrument_type
+                        .as_deref()
+                        .and_then(InstrumentType::from_db_str);
+                    let asset_metadata: Option<serde_json::Value> = asset_metadata
+                        .as_deref()
+                        .and_then(|value| serde_json::from_str(value).ok());
+                    let mut activity = ActivityDetails::from(db);
+                    activity.asset_quote_ccy = asset_quote_ccy;
+                    activity.imported_description = imported_description;
+                    activity.asset_contract_multiplier = has_asset.then(|| {
+                        contract_multiplier_from_asset_metadata(
+                            instrument_type.as_ref(),
+                            asset_metadata.as_ref(),
+                        )
+                        .to_string()
+                    });
+                    activity
+                },
+            )
             .collect();
 
         Ok(ActivitySearchResponse {
@@ -3023,6 +3083,26 @@ impl ActivityRepositoryTrait for ActivityRepository {
         Ok(result_map)
     }
 
+    async fn fill_missing_imported_descriptions(
+        &self,
+        descriptions: Vec<(String, String)>,
+    ) -> Result<usize> {
+        if descriptions.is_empty() {
+            return Ok(0);
+        }
+        self.writer
+            .exec_tx(move |tx| -> Result<usize> {
+                let mut filled = 0;
+                for (activity_id, description) in &descriptions {
+                    if fill_missing_imported_description_tx(tx, activity_id, Some(description))? {
+                        filled += 1;
+                    }
+                }
+                Ok(filled)
+            })
+            .await
+    }
+
     /// Upserts multiple activities (insert or update on conflict by ID or idempotency_key).
     /// Respects is_user_modified flag - skips updates to user-modified activities.
     ///
@@ -3251,6 +3331,11 @@ impl ActivityRepositoryTrait for ActivityRepository {
                                 activity_id,
                                 activity_db.activity_type
                             );
+                            fill_missing_imported_description_tx(
+                                tx,
+                                &activity_id,
+                                activity_db.imported_description.as_deref(),
+                            )?;
                             result.skipped += 1;
                             continue;
                         }
@@ -3267,6 +3352,11 @@ impl ActivityRepositoryTrait for ActivityRepository {
                                         activity_id,
                                         existing_id
                                     );
+                                    fill_missing_imported_description_tx(
+                                        tx,
+                                        existing_id,
+                                        activity_db.imported_description.as_deref(),
+                                    )?;
                                     result.skipped += 1;
                                     continue;
                                 }
@@ -3291,6 +3381,11 @@ impl ActivityRepositoryTrait for ActivityRepository {
                                         activity_id,
                                         existing_id
                                     );
+                                    fill_missing_imported_description_tx(
+                                        tx,
+                                        existing_id,
+                                        activity_db.imported_description.as_deref(),
+                                    )?;
                                     result.skipped += 1;
                                     continue;
                                 }
@@ -3348,6 +3443,10 @@ impl ActivityRepositoryTrait for ActivityRepository {
                             activities::needs_review.eq(excluded(activities::needs_review)),
                             activities::idempotency_key.eq(excluded(activities::idempotency_key)),
                             activities::import_run_id.eq(excluded(activities::import_run_id)),
+                            // Kept once stored; a later sync only fills an empty one.
+                            activities::imported_description.eq(sql::<Nullable<Text>>(
+                                "COALESCE(activities.imported_description, excluded.imported_description)",
+                            )),
                             activities::updated_at.eq(now_update),
                         ))
                         .execute(tx.conn())
@@ -4069,6 +4168,7 @@ mod tests {
         currency: &str,
     ) {
         let activity = ActivityDB {
+            imported_description: None,
             id: id.to_string(),
             account_id: account_id.to_string(),
             asset_id: None,
@@ -5057,6 +5157,7 @@ mod tests {
         subtype: Option<&str>,
     ) {
         let activity = ActivityDB {
+            imported_description: None,
             id: id.to_string(),
             account_id: account_id.to_string(),
             asset_id: asset_id.map(str::to_string),
@@ -6454,6 +6555,7 @@ mod tests {
         ]
         .into_iter()
         .map(|(id, account, kind, date, record)| ActivityUpsert {
+            imported_description: None,
             id: id.into(),
             account_id: account.into(),
             asset_id: None,
@@ -6709,6 +6811,7 @@ mod tests {
         );
 
         let new_leg = NewActivity {
+            imported_description: None,
             id: None,
             account_id: "acc-c".to_string(),
             asset: None,
@@ -7082,6 +7185,7 @@ mod tests {
         drop(conn);
 
         let synced = |id: &str, notes: &str| ActivityUpsert {
+            imported_description: None,
             id: id.into(),
             account_id: "card".into(),
             asset_id: None,
@@ -7644,6 +7748,7 @@ mod tests {
                         map_broker_activity(&incoming, "acc-sync", Some("USD"), Some("USD"))
                             .expect("mapped broker activity");
                     ActivityUpsert {
+                        imported_description: None,
                         id: mapped.id.unwrap(),
                         account_id: mapped.account_id,
                         asset_id: None,
@@ -7733,6 +7838,7 @@ mod tests {
         insert_account(&mut conn, "acc-sync");
 
         let first = ActivityUpsert {
+            imported_description: None,
             id: "provider-id-1".to_string(),
             account_id: "acc-sync".to_string(),
             asset_id: None,
@@ -7758,6 +7864,7 @@ mod tests {
         };
 
         let second = ActivityUpsert {
+            imported_description: None,
             id: "provider-id-2".to_string(),
             account_id: "acc-sync".to_string(),
             asset_id: None,
@@ -7856,6 +7963,7 @@ mod tests {
 
         let result = repo
             .bulk_upsert(vec![ActivityUpsert {
+                imported_description: None,
                 id: "changed-provider-id".to_string(),
                 account_id: "acc-sync-draft".to_string(),
                 asset_id: None,
@@ -7919,6 +8027,7 @@ mod tests {
         drop(conn);
 
         repo.bulk_upsert(vec![ActivityUpsert {
+            imported_description: None,
             id: "changed-provider-id".to_string(),
             account_id: "acc-sync-review".to_string(),
             asset_id: None,
@@ -7975,6 +8084,7 @@ mod tests {
         }
 
         let split = ActivityUpsert {
+            imported_description: None,
             id: "provider-id-1".to_string(),
             account_id: "acc-sync".to_string(),
             asset_id: Some("asset-vgt".to_string()),
@@ -8034,6 +8144,7 @@ mod tests {
         insert_account(&mut conn, "acc-sync");
 
         let first = ActivityUpsert {
+            imported_description: None,
             id: "provider-id-1".to_string(),
             account_id: "acc-sync".to_string(),
             asset_id: None,
@@ -8059,6 +8170,7 @@ mod tests {
         };
 
         let second = ActivityUpsert {
+            imported_description: None,
             id: "provider-id-2".to_string(),
             account_id: "acc-sync".to_string(),
             asset_id: None,
@@ -8126,6 +8238,7 @@ mod tests {
     }
     fn qa_floor_new_activity(activity_type: &str) -> NewActivity {
         NewActivity {
+            imported_description: None,
             id: None,
             account_id: "acc-floor".to_string(),
             asset: None,
@@ -8261,6 +8374,555 @@ mod tests {
                 .await
                 .expect("security transfer with no amount is legal"),
             1
+        );
+    }
+
+    // ── Imported description ────────────────────────────────────────────
+
+    fn imported_new_activity(id: &str, notes: &str, description: Option<&str>) -> NewActivity {
+        NewActivity {
+            id: Some(id.to_string()),
+            account_id: "acc-bank".to_string(),
+            activity_type: "WITHDRAWAL".to_string(),
+            quantity: None,
+            unit_price: None,
+            amount: Some(Decimal::new(1234, 2)),
+            notes: Some(notes.to_string()),
+            imported_description: description.map(str::to_string),
+            source_system: Some("CSV".to_string()),
+            idempotency_key: Some(format!("key-{id}")),
+            ..qa_floor_new_activity("WITHDRAWAL")
+        }
+    }
+
+    /// Stores the rows as an import does and returns their ids, in order.
+    async fn import_bank_rows(repo: &ActivityRepository, rows: Vec<NewActivity>) -> Vec<String> {
+        repo.create_activities_returning(rows)
+            .await
+            .expect("import")
+            .into_iter()
+            .map(|row| row.id)
+            .collect()
+    }
+
+    fn bank_upsert(id: &str, text: &str) -> ActivityUpsert {
+        ActivityUpsert {
+            id: id.to_string(),
+            account_id: "acc-bank".to_string(),
+            asset_id: None,
+            activity_type: "WITHDRAWAL".to_string(),
+            subtype: None,
+            activity_date: "2026-01-15T00:00:00Z".to_string(),
+            quantity: None,
+            unit_price: None,
+            currency: "USD".to_string(),
+            fee: None,
+            tax: None,
+            amount: Some(Decimal::new(1234, 2)),
+            status: None,
+            notes: Some(text.to_string()),
+            imported_description: Some(text.to_string()),
+            fx_rate: None,
+            metadata: None,
+            needs_review: None,
+            source_system: Some("SIMPLEFIN".to_string()),
+            source_record_id: Some("bank-txn-1".to_string()),
+            source_group_id: None,
+            idempotency_key: Some(format!("key-{id}")),
+            import_run_id: None,
+        }
+    }
+
+    fn notes_update(id: &str, notes: &str) -> ActivityUpdate {
+        ActivityUpdate {
+            unlink_transfer_pair_id: None,
+            split_review: None,
+            id: id.to_string(),
+            account_id: "acc-bank".to_string(),
+            asset: None,
+            activity_type: "WITHDRAWAL".to_string(),
+            subtype: None,
+            activity_date: "2024-03-01T00:00:00Z".to_string(),
+            quantity: None,
+            unit_price: None,
+            currency: "USD".to_string(),
+            fee: None,
+            tax: None,
+            amount: None,
+            status: None,
+            needs_review: None,
+            notes: Some(notes.to_string()),
+            fx_rate: None,
+            metadata: None,
+        }
+    }
+
+    fn imported_description_of(conn: &mut SqliteConnection, id: &str) -> Option<String> {
+        activities::table
+            .find(id)
+            .select(activities::imported_description)
+            .first::<Option<String>>(conn)
+            .expect("activity row")
+    }
+
+    #[tokio::test]
+    async fn migration_backfills_the_imported_description_of_imported_rows_only() {
+        use diesel::connection::SimpleConnection;
+        let (pool, _writer, _dir) = setup_db();
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account(&mut conn, "acc-bank");
+        insert_broker_account_and_import_run(&mut conn);
+        conn.batch_execute(include_str!(
+            "../../migrations/2026-11-26-000001_activity_imported_description/down.sql"
+        ))
+        .expect("back to the schema before the column");
+
+        // (id, source_system, source_record_id, import_run_id, notes)
+        type Text<'a> = Option<&'a str>;
+        type Row<'a> = (&'a str, Text<'a>, Text<'a>, Text<'a>, Text<'a>);
+        let rows: [Row<'_>; 11] = [
+            ("csv", Some("CSV"), None, None, Some("TESCO STORES 3301")),
+            ("csv-lower", Some(" csv "), None, None, Some("SHELL 0042")),
+            (
+                "addon",
+                Some("CSV"),
+                Some("addon:bank:tx-1"),
+                None,
+                Some("RENT"),
+            ),
+            (
+                "bank-record",
+                Some("SIMPLEFIN"),
+                Some("tx-9"),
+                None,
+                Some("NETFLIX.COM"),
+            ),
+            (
+                "broker-run",
+                Some("SNAPTRADE"),
+                None,
+                Some("local-import-run"),
+                Some("DIVIDEND"),
+            ),
+            ("unnamed-source", None, Some("tx-10"), None, Some("WIRE IN")),
+            ("csv-blank", Some("CSV"), None, None, Some("   ")),
+            ("csv-empty", Some("CSV"), None, None, None),
+            ("manual", Some("MANUAL"), None, None, Some("Lunch with Sam")),
+            (
+                "legacy",
+                None,
+                None,
+                None,
+                Some("Typed before sources were recorded"),
+            ),
+            (
+                "generated",
+                Some("yahoo"),
+                None,
+                None,
+                Some("Auto-imported split (2)"),
+            ),
+        ];
+        for (id, source_system, source_record_id, import_run_id, notes) in rows {
+            diesel::sql_query(format!(
+                "INSERT INTO activities \
+                 (id, account_id, activity_type, status, activity_date, amount, currency, notes, \
+                  source_system, source_record_id, import_run_id, is_user_modified, needs_review, \
+                  created_at, updated_at) \
+                 VALUES ('{id}', 'acc-bank', 'WITHDRAWAL', 'POSTED', '2026-01-01T00:00:00Z', '10', \
+                         'USD', {}, {}, {}, {}, 0, 0, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
+                sql_value(notes),
+                sql_value(source_system),
+                sql_value(source_record_id),
+                sql_value(import_run_id),
+            ))
+            .execute(&mut conn)
+            .expect("insert activity");
+        }
+
+        conn.batch_execute(include_str!(
+            "../../migrations/2026-11-26-000001_activity_imported_description/up.sql"
+        ))
+        .expect("migrate");
+
+        for (id, _, _, _, notes) in rows {
+            let imported = matches!(
+                id,
+                "csv" | "csv-lower" | "addon" | "bank-record" | "broker-run" | "unnamed-source"
+            );
+            assert_eq!(
+                imported_description_of(&mut conn, id).as_deref(),
+                notes.filter(|_| imported),
+                "{id}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn edits_never_change_the_imported_description() {
+        let (pool, writer, _dir) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account(&mut conn, "acc-bank");
+
+        let ids = import_bank_rows(
+            &repo,
+            vec![
+                imported_new_activity("single", "TESCO STORES 3301", Some("TESCO STORES 3301")),
+                imported_new_activity("bulk", "SHELL 0042", Some("SHELL 0042")),
+                imported_new_activity("blank", "Cash", Some("   ")),
+            ],
+        )
+        .await;
+        let (single, bulk, blank) = (ids[0].as_str(), ids[1].as_str(), ids[2].as_str());
+        let manual = repo
+            .create_activity(NewActivity {
+                source_system: None,
+                idempotency_key: None,
+                ..imported_new_activity("manual", "Lunch", None)
+            })
+            .await
+            .expect("manual create");
+        assert_eq!(manual.imported_description, None);
+        assert_eq!(imported_description_of(&mut conn, blank), None);
+
+        let updated = repo
+            .update_activity(notes_update(single, "Weekly shop"))
+            .await
+            .expect("edit notes");
+        assert_eq!(updated.notes.as_deref(), Some("Weekly shop"));
+        assert_eq!(
+            updated.imported_description.as_deref(),
+            Some("TESCO STORES 3301")
+        );
+        repo.bulk_mutate_activities(
+            Vec::new(),
+            vec![
+                notes_update(bulk, ""),
+                notes_update(&manual.id, "Lunch with Sam"),
+            ],
+            Vec::new(),
+        )
+        .await
+        .expect("bulk edit");
+
+        assert_eq!(
+            imported_description_of(&mut conn, single).as_deref(),
+            Some("TESCO STORES 3301")
+        );
+        assert_eq!(
+            imported_description_of(&mut conn, bulk).as_deref(),
+            Some("SHELL 0042")
+        );
+        // Editing a manual entry does not turn its notes into bank text.
+        assert_eq!(imported_description_of(&mut conn, &manual.id), None);
+    }
+
+    #[tokio::test]
+    async fn search_reads_and_matches_the_imported_description() {
+        let (pool, writer, _dir) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        insert_account(&mut get_connection(&pool).expect("conn"), "acc-bank");
+        let ids = import_bank_rows(
+            &repo,
+            vec![
+                imported_new_activity("shop", "TESCO STORES 3301", Some("TESCO STORES 3301")),
+                imported_new_activity("fuel", "SHELL 0042", Some("SHELL 0042")),
+            ],
+        )
+        .await;
+        let (shop_id, fuel_id) = (ids[0].as_str(), ids[1].as_str());
+        repo.update_activity(notes_update(shop_id, "Weekly shop"))
+            .await
+            .expect("edit notes");
+
+        for (keyword, expected) in [("tesco", shop_id), ("weekly", shop_id), ("shell", fuel_id)] {
+            let found = repo
+                .search_activities(
+                    0,
+                    10,
+                    None,
+                    None,
+                    Some(keyword.to_string()),
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .expect("search");
+            assert_eq!(found.data.len(), 1, "{keyword}");
+            assert_eq!(found.data[0].id, expected, "{keyword}");
+        }
+        let shop = repo
+            .export_activities(false, None, None)
+            .expect("export")
+            .data
+            .into_iter()
+            .find(|row| row.id == shop_id)
+            .expect("exported row");
+        assert_eq!(shop.comment.as_deref(), Some("Weekly shop"));
+        assert_eq!(
+            shop.imported_description.as_deref(),
+            Some("TESCO STORES 3301")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_later_sync_fills_an_empty_imported_description_and_keeps_a_stored_one() {
+        let (pool, writer, _dir) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer);
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account(&mut conn, "acc-bank");
+
+        let created = repo
+            .bulk_upsert(vec![bank_upsert("txn", "NETFLIX.COM 866-579-7172")])
+            .await
+            .expect("first sync");
+        assert_eq!(created.created, 1);
+        assert_eq!(
+            imported_description_of(&mut conn, "txn").as_deref(),
+            Some("NETFLIX.COM 866-579-7172")
+        );
+
+        // The provider rewords the record: the notes follow, the first text stays.
+        let refreshed = repo
+            .bulk_upsert(vec![bank_upsert("txn", "Netflix")])
+            .await
+            .expect("refresh");
+        assert_eq!(refreshed.updated, 1);
+        let row = repo.get_activity("txn").expect("row");
+        assert_eq!(row.notes.as_deref(), Some("Netflix"));
+        assert_eq!(
+            row.imported_description.as_deref(),
+            Some("NETFLIX.COM 866-579-7172")
+        );
+
+        // A row stored without one, as before the column, is filled by the next sync.
+        diesel::update(activities::table.find("txn"))
+            .set(activities::imported_description.eq(None::<String>))
+            .execute(&mut conn)
+            .expect("clear");
+        repo.bulk_upsert(vec![bank_upsert("txn", "Netflix")])
+            .await
+            .expect("fill by id");
+        assert_eq!(
+            imported_description_of(&mut conn, "txn").as_deref(),
+            Some("Netflix")
+        );
+
+        // A row the user edited is otherwise left alone by a sync, whether it
+        // is matched by id, source record or idempotency key.
+        repo.update_activity(ActivityUpdate {
+            activity_date: "2026-01-15T00:00:00Z".to_string(),
+            ..notes_update("txn", "Streaming")
+        })
+        .await
+        .expect("user edit");
+        let mut by_key = bank_upsert("txn-by-key", "By key");
+        by_key.source_record_id = None;
+        by_key.idempotency_key = Some("key-txn".to_string());
+        for (resent, filled) in [
+            (bank_upsert("txn", "By id"), "By id"),
+            (bank_upsert("txn-reissued", "By record"), "By record"),
+            (by_key, "By key"),
+        ] {
+            diesel::update(activities::table.find("txn"))
+                .set(activities::imported_description.eq(None::<String>))
+                .execute(&mut conn)
+                .expect("clear");
+            for _ in 0..2 {
+                let result = repo
+                    .bulk_upsert(vec![resent.clone()])
+                    .await
+                    .expect("re-sync");
+                assert_eq!(result.skipped, 1, "{result:?}");
+            }
+            let row = repo.get_activity("txn").expect("row");
+            assert_eq!(row.notes.as_deref(), Some("Streaming"));
+            assert_eq!(row.imported_description.as_deref(), Some(filled));
+        }
+        let mut later = bank_upsert("txn", "Reworded again");
+        later.imported_description = Some("Reworded again".to_string());
+        repo.bulk_upsert(vec![later]).await.expect("re-sync");
+        assert_eq!(
+            imported_description_of(&mut conn, "txn").as_deref(),
+            Some("By key")
+        );
+        assert_eq!(repo.get_activities().expect("activities").len(), 1);
+        // A bank row is fetched by each device itself, so none of this syncs.
+        assert_eq!(sync_outbox_count(&mut conn), 0);
+    }
+
+    #[tokio::test]
+    async fn reimport_fill_stores_only_missing_imported_descriptions() {
+        let (pool, writer, _dir) = setup_db();
+        let repo = ActivityRepository::new(pool.clone(), writer.clone());
+        let mut conn = get_connection(&pool).expect("conn");
+        insert_account(&mut conn, "acc-bank");
+        let ids = import_bank_rows(
+            &repo,
+            vec![
+                imported_new_activity("kept", "Weekly shop", Some("TESCO STORES 3301")),
+                imported_new_activity("empty", "Fuel", None),
+            ],
+        )
+        .await;
+        let (kept, empty) = (ids[0].clone(), ids[1].clone());
+        diesel::delete(sync_outbox::table)
+            .execute(&mut conn)
+            .expect("clear outbox");
+        let before = repo.get_activity(&empty).expect("row");
+
+        let filled = repo
+            .fill_missing_imported_descriptions(vec![
+                (kept.clone(), "A DIFFERENT TEXT".to_string()),
+                (empty.clone(), "SHELL 0042".to_string()),
+                (empty.clone(), "SECOND TEXT".to_string()),
+                ("missing".to_string(), "NO SUCH ROW".to_string()),
+                (empty.clone(), "  ".to_string()),
+            ])
+            .await
+            .expect("fill");
+        assert_eq!(filled, 1);
+        assert_eq!(
+            imported_description_of(&mut conn, &kept).as_deref(),
+            Some("TESCO STORES 3301")
+        );
+        let after = repo.get_activity(&empty).expect("row");
+        assert_eq!(after.imported_description.as_deref(), Some("SHELL 0042"));
+        // Nothing the user owns moved.
+        assert_eq!(after.notes, before.notes);
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(after.is_user_modified, before.is_user_modified);
+        // Other devices are told the description, not sent the row again.
+        assert_eq!(
+            pending_outbox_ops(&pool, &writer),
+            vec![(
+                SyncEntity::ActivityImportedDescription,
+                empty,
+                SyncOperation::Update
+            )]
+        );
+    }
+
+    /// The description travels beside the activity row, which stays as clients
+    /// from before the column read it.
+    #[tokio::test]
+    async fn imported_description_reaches_another_device_and_no_synced_row_clears_it() {
+        let (pool_a, writer_a, _dir_a) = setup_db();
+        let repo_a = ActivityRepository::new(pool_a.clone(), writer_a.clone());
+        insert_account(&mut get_connection(&pool_a).expect("conn"), "acc-bank");
+        let ids = import_bank_rows(
+            &repo_a,
+            vec![
+                imported_new_activity("shop", "TESCO STORES 3301", Some("TESCO STORES 3301")),
+                imported_new_activity("typed", "Lunch", None),
+            ],
+        )
+        .await;
+        let (shop, typed) = (ids[0].as_str(), ids[1].as_str());
+
+        let events = outbox_as_remote_events(&pool_a, &writer_a);
+        let sent: Vec<_> = events
+            .iter()
+            .map(|(entity, id, ..)| (*entity, id.as_str()))
+            .collect();
+        assert_eq!(
+            sent,
+            vec![
+                (SyncEntity::Activity, shop),
+                (SyncEntity::ActivityImportedDescription, shop),
+                (SyncEntity::Activity, typed),
+            ]
+        );
+        for (entity, _, _, _, _, _, payload) in &events {
+            if *entity == SyncEntity::Activity {
+                assert!(payload.get("imported_description").is_none(), "{payload}");
+            }
+        }
+        let activity_event = events[0].clone();
+
+        let (pool_b, writer_b, _dir_b) = setup_db();
+        let mut conn_b = get_connection(&pool_b).expect("conn");
+        insert_account(&mut conn_b, "acc-bank");
+        let sync_b = AppSyncRepository::new(pool_b.clone(), writer_b.clone());
+        sync_b
+            .apply_remote_events_lww_batch(events)
+            .await
+            .expect("apply batch");
+        assert_eq!(
+            imported_description_of(&mut conn_b, shop).as_deref(),
+            Some("TESCO STORES 3301")
+        );
+        assert_eq!(imported_description_of(&mut conn_b, typed), None);
+
+        // A client from before the column edits the row and sends it back
+        // without the field; another sends the field as null.
+        let (_, _, _, _, _, _, mut older_payload) = activity_event;
+        older_payload["notes"] = serde_json::json!("Weekly shop");
+        let mut null_payload = older_payload.clone();
+        null_payload["notes"] = serde_json::json!("Groceries");
+        null_payload["imported_description"] = serde_json::Value::Null;
+        let mut other_payload = null_payload.clone();
+        other_payload["imported_description"] = serde_json::json!("SOME OTHER TEXT");
+        for (seq, (timestamp, payload, notes)) in [
+            ("2099-01-01T00:00:00Z", older_payload, "Weekly shop"),
+            ("2099-01-02T00:00:00Z", null_payload, "Groceries"),
+            ("2099-01-03T00:00:00Z", other_payload, "Groceries"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let applied = sync_b
+                .apply_remote_event_lww(
+                    SyncEntity::Activity,
+                    shop.to_string(),
+                    SyncOperation::Update,
+                    format!("evt-older-{seq}"),
+                    timestamp.to_string(),
+                    100 + seq as i64,
+                    payload,
+                )
+                .await
+                .expect("apply older client's edit");
+            assert!(applied);
+            let row = ActivityRepository::new(pool_b.clone(), writer_b.clone())
+                .get_activity(shop)
+                .expect("row");
+            assert_eq!(row.notes.as_deref(), Some(notes));
+            assert_eq!(
+                row.imported_description.as_deref(),
+                Some("TESCO STORES 3301")
+            );
+        }
+
+        // A description event only fills an empty one.
+        for (seq, (id, text)) in [(shop, "LATER TEXT"), (typed, "FILLED LATER"), ("gone", "X")]
+            .into_iter()
+            .enumerate()
+        {
+            sync_b
+                .apply_remote_event_lww(
+                    SyncEntity::ActivityImportedDescription,
+                    id.to_string(),
+                    SyncOperation::Update,
+                    format!("evt-description-{seq}"),
+                    "2099-02-01T00:00:00Z".to_string(),
+                    200 + seq as i64,
+                    serde_json::json!({ "id": id, "imported_description": text }),
+                )
+                .await
+                .expect("apply description");
+        }
+        assert_eq!(
+            imported_description_of(&mut conn_b, shop).as_deref(),
+            Some("TESCO STORES 3301")
+        );
+        assert_eq!(
+            imported_description_of(&mut conn_b, typed).as_deref(),
+            Some("FILLED LATER")
         );
     }
 }

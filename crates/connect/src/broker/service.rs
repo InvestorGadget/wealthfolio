@@ -709,6 +709,7 @@ impl BrokerSyncServiceTrait for BrokerSyncService {
                 amount: act.amount,
                 status: act.status,
                 notes: act.notes,
+                imported_description: act.imported_description,
                 fx_rate: act.fx_rate,
                 metadata: act.metadata,
                 needs_review: act.needs_review,

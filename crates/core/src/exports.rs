@@ -825,17 +825,60 @@ mod tests {
         let csv = records_to_csv(&[plain.clone(), balanced]).unwrap();
 
         let lines: Vec<&str> = csv.lines().collect();
-        let columns = ",\"cashBalance\",\"cashBalanceCurrency\",\"cashBalanceScope\"";
+        // The imported description follows them, last.
+        let columns =
+            ",\"cashBalance\",\"cashBalanceCurrency\",\"cashBalanceScope\",\"importedDescription\"";
         assert!(lines[0].ends_with(columns));
-        assert!(lines[1].ends_with(",\"\",\"\",\"\""));
-        assert!(lines[2].ends_with(",\"954.90\",\"USD\",\"ROW\""));
+        assert!(lines[1].ends_with(",\"\",\"\",\"\",\"\""));
+        assert!(lines[2].ends_with(",\"954.90\",\"USD\",\"ROW\",\"\""));
 
         // An export where no row has a balance keeps the same columns.
         let csv = records_to_csv(&[plain]).unwrap();
 
         let lines: Vec<&str> = csv.lines().collect();
         assert!(lines[0].ends_with(columns));
-        assert!(lines[1].ends_with(",\"\",\"\",\"\""));
+        assert!(lines[1].ends_with(",\"\",\"\",\"\",\"\""));
+    }
+
+    #[test]
+    fn csv_export_has_the_imported_description_apart_from_the_users_comment() {
+        let row: crate::activities::ActivityDetails = serde_json::from_value(serde_json::json!({
+            "id": "shop",
+            "accountId": "checking",
+            "assetId": "",
+            "activityType": "WITHDRAWAL",
+            "status": "POSTED",
+            "date": "2026-04-02T00:00:00Z",
+            "currency": "USD",
+            "amount": "30",
+            "needsReview": false,
+            "comment": "Weekly shop",
+            "createdAt": "2026-04-02T00:00:00Z",
+            "updatedAt": "2026-04-02T00:00:00Z",
+            "accountName": "Checking",
+            "accountCurrency": "USD",
+            "assetSymbol": "",
+            "assetPricingMode": "NONE",
+            "isUserModified": false,
+            "importedDescription": "TESCO STORES 3301"
+        }))
+        .unwrap();
+
+        let csv = records_to_csv(&[row]).unwrap();
+        let rows = csv_reader(&csv);
+        let column = |name: &str| {
+            let index = rows[0]
+                .iter()
+                .position(|header| header == name)
+                .unwrap_or_else(|| panic!("{name} column"));
+            rows[1][index].as_str()
+        };
+        assert_eq!(column("comment"), "Weekly shop");
+        assert_eq!(column("importedDescription"), "TESCO STORES 3301");
+        assert_eq!(
+            rows[0].last().map(String::as_str),
+            Some("importedDescription")
+        );
     }
 
     #[test]

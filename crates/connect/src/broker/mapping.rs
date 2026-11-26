@@ -639,6 +639,14 @@ pub fn map_broker_activity(
             (unit_price, quantity, fee, amount, currency_code)
         };
 
+    // The provider's text is both the starting notes and the imported
+    // description; only the notes are the user's to edit afterwards.
+    let notes = activity
+        .description
+        .clone()
+        .filter(|d| !d.trim().is_empty())
+        .or(activity.external_reference_id.clone());
+
     Some(NewActivity {
         id: Some(activity_id),
         account_id: account_id.to_string(),
@@ -655,11 +663,8 @@ pub fn map_broker_activity(
         // Review confidence is orthogonal to lifecycle. A review flag must not
         // silently remove an otherwise posted broker event from calculations.
         status: Some(wealthfolio_core::activities::ActivityStatus::Posted),
-        notes: activity
-            .description
-            .clone()
-            .filter(|d| !d.trim().is_empty())
-            .or(activity.external_reference_id.clone()),
+        notes: notes.clone(),
+        imported_description: notes,
         fx_rate,
         metadata,
         needs_review: Some(needs_review_flag),

@@ -51,6 +51,7 @@ diesel::table! {
         needs_review -> Integer,
         created_at -> Text,
         updated_at -> Text,
+        imported_description -> Nullable<Text>,
     }
 }
 

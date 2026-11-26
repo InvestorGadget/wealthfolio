@@ -549,6 +549,7 @@ pub(crate) mod tests {
     fn expiry(id: &str, account_id: &str, asset_id: &str, at: &str) -> Activity {
         let at: DateTime<Utc> = at.parse().expect("valid test instant");
         Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: account_id.to_string(),
             asset_id: Some(asset_id.to_string()),

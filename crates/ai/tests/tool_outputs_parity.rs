@@ -675,6 +675,7 @@ fn fixture_cash_activity(
         .unwrap_or_default();
     CashActivity {
         activity: Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: account_id.to_string(),
             asset_id: None,

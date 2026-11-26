@@ -1113,6 +1113,8 @@ fn entity_storage_mapping(entity: &SyncEntity) -> Option<(&'static str, &'static
         SyncEntity::Quote => Some(("quotes", "id")),
         SyncEntity::AssetTaxonomyAssignment => Some(("asset_taxonomy_assignments", "id")),
         SyncEntity::Activity => Some(("activities", "id")),
+        // Fills one column of an existing activity; custom branch in apply_remote_event_lww_tx.
+        SyncEntity::ActivityImportedDescription => None,
         // Broker activity user patches update an existing local broker row by provider identity.
         SyncEntity::BrokerActivityUserPatch => None,
         SyncEntity::ActivityImportProfile => Some(("import_account_templates", "id")),
@@ -1495,6 +1497,72 @@ fn restore_sql_error(phase: &str, table: &str, err: diesel::result::Error) -> Er
     } else {
         Error::Database(DatabaseError::Internal(message))
     }
+}
+
+const IMPORTED_DESCRIPTION_COLUMN: &str = "imported_description";
+
+/// The event that carries an activity's imported description to other
+/// devices. It travels apart from the activity row because clients from
+/// before the column reject a row that has it; they skip this entity.
+pub(crate) fn imported_description_outbox_request(
+    activity_id: &str,
+    description: &str,
+) -> OutboxWriteRequest {
+    OutboxWriteRequest::new(
+        SyncEntity::ActivityImportedDescription,
+        activity_id,
+        SyncOperation::Update,
+        serde_json::json!({ "id": activity_id, IMPORTED_DESCRIPTION_COLUMN: description }),
+    )
+}
+
+/// Takes the imported description out of an activity row's outbox payload, so
+/// the row stays readable by clients from before the column. Returns the event
+/// that carries it instead, when the row has one.
+pub(in crate::sync::app_sync) fn split_imported_description_from_activity_payload(
+    request: &mut OutboxWriteRequest,
+) -> Option<OutboxWriteRequest> {
+    if request.entity != SyncEntity::Activity || request.op == SyncOperation::Delete {
+        return None;
+    }
+    let description = request
+        .payload
+        .as_object_mut()?
+        .remove(IMPORTED_DESCRIPTION_COLUMN)?;
+    let description = description
+        .as_str()
+        .filter(|text| !text.trim().is_empty())?;
+    Some(imported_description_outbox_request(
+        &request.entity_id,
+        description,
+    ))
+}
+
+/// Stores a synced imported description on its activity when the activity
+/// has none. One already stored is the first one received and is kept, so
+/// replaying or reordering these events changes nothing. Returns whether a
+/// row was filled.
+fn fill_missing_imported_description_event(
+    conn: &mut SqliteConnection,
+    activity_id: &str,
+    payload: &serde_json::Value,
+) -> Result<bool> {
+    let Some(description) = payload
+        .get(IMPORTED_DESCRIPTION_COLUMN)
+        .and_then(|value| value.as_str())
+        .filter(|text| !text.trim().is_empty())
+    else {
+        return Ok(false);
+    };
+    let filled = diesel::update(
+        activities::table
+            .find(activity_id)
+            .filter(activities::imported_description.is_null()),
+    )
+    .set(activities::imported_description.eq(description))
+    .execute(conn)
+    .map_err(StorageError::from)?;
+    Ok(filled > 0)
 }
 
 #[derive(Debug, Clone)]
@@ -2620,6 +2688,12 @@ fn apply_remote_event_lww_tx(
                 &client_timestamp_value,
             )?;
             mark_table_incremental_applied_tx(conn, "spending_preset_rule_deletions")?;
+        } else if entity == SyncEntity::ActivityImportedDescription {
+            applied_entity_change = op != SyncOperation::Delete
+                && fill_missing_imported_description_event(conn, &entity_id_value, &payload_json)?;
+            if applied_entity_change {
+                mark_table_incremental_applied_tx(conn, "activities")?;
+            }
         } else if entity == SyncEntity::AddonStorage {
             apply_addon_storage_event(
                 conn,
@@ -2723,6 +2797,14 @@ fn apply_remote_event_lww_tx(
                         .iter()
                         .map(|(k, _)| {
                             let quoted = quote_identifier(k);
+                            // An activity's imported description is kept once
+                            // stored: a synced row only fills an empty one.
+                            if table_name == "activities" && k == IMPORTED_DESCRIPTION_COLUMN {
+                                return format!(
+                                    "{quoted}=COALESCE({}.{quoted}, excluded.{quoted})",
+                                    quote_identifier(table_name)
+                                );
+                            }
                             format!("{quoted}=excluded.{quoted}")
                         })
                         .collect::<Vec<_>>()
@@ -5076,6 +5158,7 @@ mod tests {
         let activity_repo = ActivityRepository::new(pool.clone(), writer);
         activity_repo
             .bulk_upsert(vec![ActivityUpsert {
+                imported_description: None,
                 id: "broker-local-activity-imported-later".to_string(),
                 account_id: "broker-local-account".to_string(),
                 asset_id: None,
@@ -9819,6 +9902,114 @@ mod tests {
             assert!(change.payload.get("baseCurrency").is_none());
             assert!(change.payload.get("base_currency").is_none());
             assert_eq!(change.payload.as_object().unwrap().len(), 13);
+        }
+    }
+
+    #[test]
+    fn activity_outbox_payloads_are_accepted_by_the_column_catalog_before_imported_descriptions() {
+        use crate::activities::ActivityDB;
+        use crate::sync::app_sync::ProjectedChange;
+
+        // The activities columns of a peer predating the imported description.
+        // Built by hand: the catalog a connection loads is cached per process.
+        let older_peer = PayloadColumnCatalog {
+            writable: [
+                "id",
+                "account_id",
+                "asset_id",
+                "activity_type",
+                "activity_type_override",
+                "source_type",
+                "subtype",
+                "status",
+                "activity_date",
+                "settlement_date",
+                "quantity",
+                "unit_price",
+                "amount",
+                "fee",
+                "tax",
+                "currency",
+                "fx_rate",
+                "notes",
+                "metadata",
+                "source_system",
+                "source_record_id",
+                "source_group_id",
+                "idempotency_key",
+                "import_run_id",
+                "is_user_modified",
+                "needs_review",
+                "created_at",
+                "updated_at",
+            ]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+            readonly: HashSet::new(),
+        };
+        let rejected_keys = |payload: &serde_json::Value| -> Vec<String> {
+            payload
+                .as_object()
+                .unwrap()
+                .keys()
+                .filter(|key| resolve_payload_column(key, &older_peer, "activities").is_none())
+                .cloned()
+                .collect()
+        };
+        let row = ActivityDB {
+            id: "activity-1".to_string(),
+            source_system: Some("CSV".to_string()),
+            notes: Some("Weekly shop".to_string()),
+            imported_description: Some("TESCO STORES 3301".to_string()),
+            ..Default::default()
+        };
+        let as_stored = ProjectedChange::for_model(&row, SyncOperation::Create).unwrap();
+        assert_eq!(
+            rejected_keys(&as_stored.payload),
+            vec!["imported_description".to_string()],
+            "the older peer rejects the row while it carries the column"
+        );
+
+        let mut request = OutboxWriteRequest::new(
+            SyncEntity::Activity,
+            "activity-1",
+            SyncOperation::Create,
+            as_stored.payload,
+        );
+        let description = split_imported_description_from_activity_payload(&mut request)
+            .expect("the description travels in its own event");
+        assert!(
+            rejected_keys(&request.payload).is_empty(),
+            "an activity outbox event must remain readable by older peers"
+        );
+        assert_eq!(request.payload.as_object().unwrap().len(), 28);
+        assert_eq!(description.entity, SyncEntity::ActivityImportedDescription);
+        assert_eq!(description.entity_id, "activity-1");
+        assert_eq!(
+            description.payload,
+            serde_json::json!({ "id": "activity-1", "imported_description": "TESCO STORES 3301" })
+        );
+
+        // A row without one sends nothing extra, and a delete is left as it is.
+        for (op, payload) in [
+            (
+                SyncOperation::Update,
+                serde_json::json!({ "id": "activity-1", "imported_description": null }),
+            ),
+            (
+                SyncOperation::Update,
+                serde_json::json!({ "id": "activity-1", "imported_description": " " }),
+            ),
+            (
+                SyncOperation::Delete,
+                serde_json::json!({ "id": "activity-1" }),
+            ),
+        ] {
+            let mut request =
+                OutboxWriteRequest::new(SyncEntity::Activity, "activity-1", op, payload);
+            assert!(split_imported_description_from_activity_payload(&mut request).is_none());
+            assert!(request.payload.get("imported_description").is_none());
         }
     }
 
