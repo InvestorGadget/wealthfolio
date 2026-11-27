@@ -78,6 +78,7 @@ import { TransactionDayHeader, TransactionDayHeading } from "./transaction-day-h
 import { TransactionRow } from "./transaction-row";
 import { SpendingActivityDataGrid } from "./spending-activity-data-grid";
 import { SplitTransactionSheet } from "./split-transaction-sheet";
+import { RunRulesDialog } from "./run-rules-dialog";
 import { TransactionsBulkBar } from "./transactions-bulk-bar";
 import { TransactionsFilterBar, type FilterOption } from "./transactions-filter-bar";
 import type { QuickCategorizeScope } from "./quick-categorize-popover";
@@ -846,6 +847,8 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
     );
 
     const clearSelection = useCallback(() => setSelectedRowIds(new Set()), []);
+    // The transactions the "run rules" review is open on.
+    const [runRulesOn, setRunRulesOn] = useState<string[]>();
 
     const exitSelectionMode = useCallback(() => {
       setSelectionMode(false);
@@ -1340,6 +1343,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
             onTagEvent={handleBulkSetEvent}
             payees={payees.data?.categories ?? []}
             onSetPayee={handleBulkSetPayee}
+            onRunRules={() => setRunRulesOn(Array.from(selectedRowIds))}
             onDelete={handleBulkDelete}
             onClearSelection={clearSelection}
           />
@@ -1560,6 +1564,10 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
               hidePicker
             />
           ))}
+
+        {runRulesOn && (
+          <RunRulesDialog activityIds={runRulesOn} onClose={() => setRunRulesOn(undefined)} />
+        )}
 
         <DeleteTransactionsDialog
           open={!!deletingIds && deletingIds.length > 0}

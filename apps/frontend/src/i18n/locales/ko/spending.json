@@ -179,7 +179,31 @@
     "setPayeeNone": "거래처 없음",
     "setPayeeHint": "일치하는 거래는 직접 선택한 경우가 아니면 이 거래처로도 분류됩니다.",
     "setPayeeChip": "거래처 {{name}}도 설정",
-    "unknownPayee": "알 수 없는 거래처"
+    "unknownPayee": "알 수 없는 거래처",
+    "runSelected": {
+      "action": "규칙 실행",
+      "title": "선택한 거래에 규칙 실행",
+      "loading": "규칙이 변경할 내용을 확인하는 중…",
+      "previewError": "규칙이 변경할 내용을 확인하지 못했습니다. 닫은 후 다시 시도하세요.",
+      "nothing": "이 거래를 변경하는 규칙이 없습니다.",
+      "willChange_one": "규칙이 거래 {{count}}건을 변경합니다.",
+      "willChange_other": "규칙이 거래 {{count}}건을 변경합니다.",
+      "keptManual_one": "직접 지정한 {{count}}건은 유지됩니다.",
+      "keptManual_other": "직접 지정한 {{count}}건은 유지됩니다.",
+      "apply": "규칙 실행",
+      "done_one": "규칙이 거래 {{count}}건을 변경했습니다.",
+      "done_other": "규칙이 거래 {{count}}건을 변경했습니다.",
+      "doneKept": "직접 지정하여 유지됨: {{count}}건.",
+      "doneReplaced": "직접 지정한 값 교체됨: {{count}}건.",
+      "splitsKept": "분할 유지됨: {{count}}건.",
+      "error": "규칙을 실행하지 못했습니다."
+    },
+    "override": {
+      "label": "직접 지정한 카테고리와 거래처도 교체 ({{count}}건)",
+      "confirmTitle": "직접 지정한 내용을 교체할까요?",
+      "confirmDescription": "규칙과 일치하는 거래에서는 직접 지정한 카테고리와 거래처가 교체됩니다(대상 거래: {{count}}건). 이 작업은 되돌릴 수 없습니다.",
+      "confirm": "교체하고 실행"
+    }
   },
   "transactions": {
     "filterByPayee": "{{name}} 거래 보기",
