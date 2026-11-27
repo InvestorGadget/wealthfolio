@@ -1965,6 +1965,7 @@ mod tests {
                 .with_ymd_and_hms(2026, 9, day, 12, 0, 0)
                 .unwrap();
             crate::activities::Activity {
+                imported_description: None,
                 id: id.into(),
                 account_id: account.into(),
                 asset_id: None,

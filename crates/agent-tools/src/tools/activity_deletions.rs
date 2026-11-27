@@ -526,6 +526,7 @@ mod tests {
 
     fn activity(id: &str) -> Activity {
         Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: "acct".to_string(),
             asset_id: None,

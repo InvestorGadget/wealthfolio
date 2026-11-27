@@ -422,6 +422,7 @@ mod tests {
 
     fn mk_activity(id: &str, date: DateTime<Utc>) -> Activity {
         Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: "acct1".to_string(),
             asset_id: None,

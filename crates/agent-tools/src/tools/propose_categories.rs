@@ -350,6 +350,7 @@ pub(crate) fn merge_ai_proposals(
                 amount: row.amount,
                 currency: row.currency.clone(),
                 notes: row.notes.clone(),
+                bank_description: row.bank_description.clone(),
                 taxonomy_id: tax_id.clone(),
                 category_id: cat_id.clone(),
                 category_path: path.clone(),
@@ -383,6 +384,7 @@ mod tests {
             amount: -42.0,
             currency: "USD".to_string(),
             notes: Some("STARBUCKS".to_string()),
+            bank_description: None,
             reason: "test".to_string(),
             allowed_taxonomy_id: Some("tax1".to_string()),
         }
@@ -613,6 +615,7 @@ mod tests {
             amount: -10.0,
             currency: "USD".to_string(),
             notes: None,
+            bank_description: None,
             taxonomy_id: "tax1".to_string(),
             category_id: "cat-g".to_string(),
             category_path: "Food / Groceries".to_string(),

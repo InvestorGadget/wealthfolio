@@ -195,6 +195,8 @@
     "categorizeHint": "請從同一個非中性現金流群組中選取要歸類的交易",
     "tagEvent": "標記事件",
     "deselect": "取消選取交易",
+    "bankText": "銀行摘要：{{text}}",
+    "bankDescription": "銀行摘要",
     "select": "選取交易",
     "review": "檢查",
     "neutral": "中性",
@@ -934,6 +936,8 @@
     "tagEventOptional": "標記一個事件（選填）",
     "notesPayee": "備註／收款方",
     "notesPlaceholder": "例如：AMAZON*MARKETPLACE、STARBUCKS COFFEE",
+    "bankDescription": "銀行摘要",
+    "bankDescriptionHint": "依匯入時的原樣保留。無論備註寫了什麼，規則都比對這段文字。",
     "updateTransaction": "更新交易",
     "createTransaction": "建立交易",
     "typeChange": {

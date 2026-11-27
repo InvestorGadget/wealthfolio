@@ -794,6 +794,7 @@ export function createDraftActivities(
     const rawFee = getColumnValue(row, ImportFormat.FEE);
     const rawTax = getColumnValue(row, ImportFormat.TAX);
     const rawComment = getColumnValue(row, ImportFormat.COMMENT);
+    const rawImportedDescription = getColumnValue(row, ImportFormat.IMPORTED_DESCRIPTION);
     const rawAccount = getColumnValue(row, ImportFormat.ACCOUNT);
     const rawFxRate = getColumnValue(row, ImportFormat.FX_RATE);
     const rawSubtype = getColumnValue(row, ImportFormat.SUBTYPE);
@@ -884,6 +885,7 @@ export function createDraftActivities(
     const fee = parseNumericValue(rawFee, decimalFor(ImportFormat.FEE), thousandsSeparator);
     let tax = parseNumericValue(rawTax, decimalFor(ImportFormat.TAX), thousandsSeparator);
     const comment = rawComment?.trim();
+    const importedDescription = rawImportedDescription?.trim() || undefined;
     const fxRate = parseNumericValue(
       rawFxRate,
       decimalFor(ImportFormat.FX_RATE),
@@ -998,6 +1000,7 @@ export function createDraftActivities(
       boundaryInference,
       accountId,
       comment,
+      importedDescription,
       isEdited: false,
     };
 
@@ -1053,6 +1056,7 @@ export function draftToActivityImport(draft: DraftActivity): ActivityImport {
     lineNumber: draft.rowIndex + 1,
     isDraft: false,
     comment: draft.comment,
+    importedDescription: draft.importedDescription,
     forceImport: draft.forceImport ?? false,
     isExternal: isTransfer || isCredit ? draft.isExternal : undefined,
   };

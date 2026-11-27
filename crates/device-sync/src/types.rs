@@ -525,6 +525,7 @@ pub fn sync_entity_from_remote(entity: &str) -> Option<SyncEntity> {
         "quote" => Some(SyncEntity::Quote),
         "asset_taxonomy_assignment" => Some(SyncEntity::AssetTaxonomyAssignment),
         "activity" => Some(SyncEntity::Activity),
+        "activity_imported_description" => Some(SyncEntity::ActivityImportedDescription),
         "broker_activity_user_patch" => Some(SyncEntity::BrokerActivityUserPatch),
         "activity_import_profile" => Some(SyncEntity::ActivityImportProfile),
         "import_template" => Some(SyncEntity::ImportTemplate),
@@ -696,6 +697,14 @@ mod tests {
         assert_eq!(
             sync_entity_from_remote("app_preference"),
             Some(SyncEntity::AppPreference)
+        );
+    }
+
+    #[test]
+    fn activity_imported_description_wire_entity_is_recognized() {
+        assert_eq!(
+            sync_entity_from_remote("activity_imported_description"),
+            Some(SyncEntity::ActivityImportedDescription)
         );
     }
 

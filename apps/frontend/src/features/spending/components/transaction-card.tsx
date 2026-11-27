@@ -7,6 +7,7 @@ import { AccountType } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { Card, Icons, PrivacyAmount, useDateFormatting } from "@wealthfolio/ui";
 
+import { getDifferingBankText, getTransactionTitle } from "../lib/bank-text";
 import { getEffectiveCashActivityType, isCreditCardAccountType } from "../lib/constants";
 import {
   getTransactionDisplay,
@@ -94,6 +95,8 @@ function TransactionCardImpl({
 
   const { t } = useTranslation();
   const a = row.activity;
+  const title = getTransactionTitle(a);
+  const bankText = getDifferingBankText(a);
   const { isOutflow, isIncome, isSaving, isNeutral, sign, safeAmount } = getTransactionDisplay(
     a,
     account?.accountType,
@@ -147,9 +150,9 @@ function TransactionCardImpl({
               {/* The payee leads; what the bank wrote follows, quieter. */}
               {payeeName && <span>{payeeName} </span>}
               {/* The form saves no notes as "", which must not leave a blank title. */}
-              {a.notes?.trim() ? (
+              {title ? (
                 <span className={cn(payeeName && "text-muted-foreground text-xs font-normal")}>
-                  {a.notes}
+                  {title}
                 </span>
               ) : (
                 !payeeName && <span className="text-muted-foreground italic">—</span>
@@ -172,6 +175,22 @@ function TransactionCardImpl({
             </span>
           </div>
 
+          {/* The bank's own text, when the notes say something else. */}
+          {bankText && (
+            <>
+              <span className="sr-only">
+                {t("spending:transactions.bankText", { text: bankText })}
+              </span>
+              <div
+                dir="auto"
+                aria-hidden="true"
+                className="text-muted-foreground mt-0.5 truncate text-xs rtl:text-right"
+              >
+                {bankText}
+              </div>
+            </>
+          )}
+
           {/* Everything secondary shares one line: the day heading above owns
               the date, and the category sits inline the way the table row shows
               it rather than in a chip row of its own. */}
@@ -184,7 +203,9 @@ function TransactionCardImpl({
               <button type="button" className={INLINE} onClick={() => onEditSplits(row)}>
                 <Icons.SplitHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span className="truncate">
-                  {t("spending:transactions.splitLines", { count: row.splitCount })}
+                  {t("spending:transactions.splitLines", {
+                    count: row.splitCount,
+                  })}
                 </span>
               </button>
             ) : (
@@ -263,7 +284,9 @@ function TransactionCardImpl({
                   type="button"
                   aria-label={
                     event
-                      ? t("spending:transactions.changeEvent", { name: event.name })
+                      ? t("spending:transactions.changeEvent", {
+                          name: event.name,
+                        })
                       : t("spending:transactions.tagEvent")
                   }
                   className={cn(INLINE, event && "bg-muted/60 max-w-[45%] rounded-full px-1.5")}
@@ -272,7 +295,9 @@ function TransactionCardImpl({
                     <>
                       <span
                         className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: eventTypeColor ?? "var(--muted-foreground)" }}
+                        style={{
+                          backgroundColor: eventTypeColor ?? "var(--muted-foreground)",
+                        }}
                         aria-hidden="true"
                       />
                       <span className="truncate">{event.name}</span>
@@ -303,7 +328,11 @@ function TransactionCardImpl({
           groups={[
             {
               items: [
-                { icon: Icons.Pencil, label: t("common:edit"), onClick: () => onEdit(row) },
+                {
+                  icon: Icons.Pencil,
+                  label: t("common:edit"),
+                  onClick: () => onEdit(row),
+                },
                 ...(canMarkReimbursement
                   ? [
                       {

@@ -195,6 +195,8 @@
     "categorizeHint": "カテゴリ分類するには、中立以外の同一キャッシュフロー区分から取引を選択してください",
     "tagEvent": "イベントをタグ付け",
     "deselect": "取引の選択を解除",
+    "bankText": "銀行の摘要: {{text}}",
+    "bankDescription": "銀行の摘要",
     "select": "取引を選択",
     "review": "確認",
     "neutral": "中立",
@@ -926,6 +928,8 @@
     "tagEventOptional": "イベントをタグ付け(任意)",
     "notesPayee": "メモ / 支払先",
     "notesPlaceholder": "例: AMAZON*MARKETPLACE、STARBUCKS COFFEE",
+    "bankDescription": "銀行の摘要",
+    "bankDescriptionHint": "取り込み時のままです。メモの内容にかかわらず、ルールはこのテキストに適用されます。",
     "updateTransaction": "取引を更新",
     "createTransaction": "取引を作成",
     "typeChange": {

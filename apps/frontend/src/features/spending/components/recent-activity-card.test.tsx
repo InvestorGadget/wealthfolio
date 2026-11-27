@@ -50,4 +50,22 @@ describe("RecentActivityCard", () => {
     expect(row?.textContent).toContain("€");
     expect(row?.textContent).not.toContain("$");
   });
+
+  it("names an activity by its notes, else by the bank's text", () => {
+    const base = {
+      accountId: "acc-1",
+      activityDate: new Date().toISOString().slice(0, 10),
+      activityType: "WITHDRAWAL",
+      amount: "10",
+      currency: "USD",
+    };
+    renderRecentActivityCard([
+      { ...base, id: "1", notes: "Weekly shop", importedDescription: "TESCO STORES 3301" },
+      { ...base, id: "2", notes: "", importedDescription: "SHELL 0042" },
+    ] as unknown as Activity[]);
+
+    expect(screen.getByText("Weekly shop")).toBeInTheDocument();
+    expect(screen.queryByText("TESCO STORES 3301")).not.toBeInTheDocument();
+    expect(screen.getByText("SHELL 0042")).toBeInTheDocument();
+  });
 });

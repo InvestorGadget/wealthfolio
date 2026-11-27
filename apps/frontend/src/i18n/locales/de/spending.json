@@ -195,6 +195,8 @@
     "categorizeHint": "Wählen Sie Transaktionen aus einem nicht neutralen Cashflow-Bereich aus, um sie zu kategorisieren",
     "tagEvent": "Ereignis zuordnen",
     "deselect": "Transaktion abwählen",
+    "bankText": "Bankbeschreibung: {{text}}",
+    "bankDescription": "Bankbeschreibung",
     "select": "Transaktion auswählen",
     "review": "Prüfen",
     "neutral": "Neutral",
@@ -934,6 +936,8 @@
     "tagEventOptional": "Ereignis zuordnen (optional)",
     "notesPayee": "Notizen / Empfänger",
     "notesPlaceholder": "z. B. AMAZON*MARKETPLACE, STARBUCKS COFFEE",
+    "bankDescription": "Bankbeschreibung",
+    "bankDescriptionHint": "Wie importiert. Regeln prüfen diesen Text, unabhängig von den Notizen.",
     "updateTransaction": "Transaktion aktualisieren",
     "createTransaction": "Transaktion erstellen",
     "typeChange": {

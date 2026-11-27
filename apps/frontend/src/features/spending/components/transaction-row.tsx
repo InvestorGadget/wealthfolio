@@ -16,6 +16,7 @@ import {
   useDateFormatting,
 } from "@wealthfolio/ui";
 
+import { getDifferingBankText, getTransactionTitle } from "../lib/bank-text";
 import { getTransactionDisplay, type TransactionRowVM } from "../lib/transactions-helpers";
 import { CategoryIconTile } from "./category-chips";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
@@ -97,6 +98,8 @@ function TransactionRowImpl({
 
   const { t } = useTranslation();
   const a = row.activity;
+  const title = getTransactionTitle(a);
+  const bankText = getDifferingBankText(a);
   const { isOutflow, isIncome, isSaving, isNeutral, sign, safeAmount } = getTransactionDisplay(
     a,
     account?.accountType,
@@ -139,32 +142,54 @@ function TransactionRowImpl({
       <TableCell className="max-w-0! px-3 py-2">
         <div className="flex items-center gap-2">
           {row.needsReview && <NeedsReviewIcon label={t("spending:transactions.review")} />}
-          {/* The payee is the name people gave; the note beside it is what the
-              bank wrote, kept visible because that is what rules match on. */}
-          {payeeName &&
-            (payeeId && onFilterPayee ? (
-              <button
-                type="button"
-                data-row-click-ignore
-                title={t("spending:transactions.filterByPayee", { name: payeeName })}
-                className="max-w-[12rem] shrink-0 truncate text-sm font-medium hover:underline"
-                onClick={() => onFilterPayee(payeeId)}
-              >
-                {payeeName}
-              </button>
-            ) : (
-              <span className="max-w-[12rem] shrink-0 truncate text-sm font-medium">
-                {payeeName}
-              </span>
-            ))}
-          {a.notes?.trim() ? (
-            <TruncatedText
-              text={a.notes}
-              className={payeeName ? "text-muted-foreground text-xs" : "text-sm"}
-            />
-          ) : (
-            !payeeName && <span className="text-muted-foreground text-sm italic">—</span>
+          {/* The payee is the name people gave. The notes follow it, quieter,
+              and the bank's own text sits on a line under both when the notes
+              say something else: it is what categorization rules match. */}
+          {(payeeName || title) && (
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {payeeName &&
+                  (payeeId && onFilterPayee ? (
+                    <button
+                      type="button"
+                      data-row-click-ignore
+                      title={t("spending:transactions.filterByPayee", {
+                        name: payeeName,
+                      })}
+                      className="max-w-[12rem] shrink-0 truncate text-sm font-medium hover:underline"
+                      onClick={() => onFilterPayee(payeeId)}
+                    >
+                      {payeeName}
+                    </button>
+                  ) : (
+                    <span className="max-w-[12rem] shrink-0 truncate text-sm font-medium">
+                      {payeeName}
+                    </span>
+                  ))}
+                {title && (
+                  <TruncatedText
+                    text={title}
+                    className={payeeName ? "text-muted-foreground text-xs" : "text-sm"}
+                  />
+                )}
+              </div>
+              {/* Said in words for a screen reader: an aria-label on a role-less
+                  element is not reliably announced. */}
+              {bankText && (
+                <>
+                  <span className="sr-only">
+                    {t("spending:transactions.bankText", { text: bankText })}
+                  </span>
+                  <TruncatedText
+                    text={bankText}
+                    aria-hidden="true"
+                    className="text-muted-foreground text-xs"
+                  />
+                </>
+              )}
+            </div>
           )}
+          {!payeeName && !title && <span className="text-muted-foreground text-sm italic">—</span>}
           {showAccount && (
             <span className="text-muted-foreground max-w-[8rem] shrink-0 truncate text-xs">
               {accountName}
@@ -181,7 +206,9 @@ function TransactionRowImpl({
                 type="button"
                 aria-label={
                   event
-                    ? t("spending:transactions.changeEvent", { name: event.name })
+                    ? t("spending:transactions.changeEvent", {
+                        name: event.name,
+                      })
                     : t("spending:transactions.tagEvent")
                 }
                 className={cn(
@@ -193,7 +220,9 @@ function TransactionRowImpl({
                   <>
                     <span
                       className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: eventTypeColor ?? "var(--muted-foreground)" }}
+                      style={{
+                        backgroundColor: eventTypeColor ?? "var(--muted-foreground)",
+                      }}
                       aria-hidden="true"
                     />
                     <span className="truncate text-xs">{event.name}</span>

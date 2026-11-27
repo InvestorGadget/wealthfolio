@@ -210,6 +210,22 @@ struct Transaction {
     has_hidden_assignment: bool,
 }
 
+/// One search result as the assistant receives it. The bank's imported
+/// description is left out: the assistant reads transactions by their notes,
+/// and only categorization needs the bank's text.
+fn transaction_item(row: CashActivity) -> Result<Value, AgentToolError> {
+    let mut item = serde_json::to_value(Transaction {
+        effective_allocations: row.effective_allocations(),
+        has_hidden_assignment: row.has_hidden_assignment(),
+        row,
+    })
+    .map_err(execution_error)?;
+    if let Some(item) = item.as_object_mut() {
+        item.remove("importedDescription");
+    }
+    Ok(item)
+}
+
 #[async_trait::async_trait]
 impl AgentTool for SearchSpendingTransactions {
     fn name(&self) -> &'static str {
@@ -278,12 +294,8 @@ impl AgentTool for SearchSpendingTransactions {
         let items = response
             .items
             .into_iter()
-            .map(|row| Transaction {
-                effective_allocations: row.effective_allocations(),
-                has_hidden_assignment: row.has_hidden_assignment(),
-                row,
-            })
-            .collect::<Vec<_>>();
+            .map(transaction_item)
+            .collect::<Result<Vec<_>, _>>()?;
         Ok(AgentToolResult {
             content: json!({"context":context,"period":period,"items":items,"totalCount":response.total_count,"offset":offset,"limit":limit,
             "hasMore":offset.saturating_add(items.len()) < response.total_count,
@@ -691,5 +703,78 @@ mod tests {
         assert_eq!(request.search.as_deref(), Some("coffee"));
         assert_eq!(request.payee_ids, Some(vec!["payee-1".to_string()]));
         assert_eq!(request.activity_ids, Some(vec!["cash-1".to_string()]));
+    }
+
+    /// Every field a search result carries. A new Activity field reaches the
+    /// assistant only once it is added here.
+    const EXPECTED_FIELDS: &[&str] = &[
+        "accountId",
+        "activityDate",
+        "activityType",
+        "activityTypeOverride",
+        "amount",
+        "assetId",
+        "assignments",
+        "cashFlowBucket",
+        "createdAt",
+        "currency",
+        "effectiveAllocations",
+        "fee",
+        "fxRate",
+        "hasHiddenAssignment",
+        "id",
+        "idempotencyKey",
+        "importRunId",
+        "isUserModified",
+        "needsReview",
+        "netAmount",
+        "notes",
+        "quantity",
+        "sourceGroupId",
+        "sourceRecordId",
+        "sourceSystem",
+        "sourceType",
+        "splits",
+        "status",
+        "subtype",
+        "tax",
+        "unitPrice",
+        "updatedAt",
+        "visibleSpendingAmount",
+    ];
+
+    #[test]
+    fn search_results_leave_out_the_imported_description() {
+        let row: CashActivity = serde_json::from_value(json!({
+            "id": "cash-1",
+            "accountId": "checking",
+            "activityType": "WITHDRAWAL",
+            "status": "POSTED",
+            "activityDate": "2026-04-02T00:00:00Z",
+            "amount": "30",
+            "currency": "USD",
+            "notes": "Weekly shop",
+            "importedDescription": "TESCO STORES 3301",
+            "isUserModified": true,
+            "needsReview": false,
+            "createdAt": "2026-04-02T00:00:00Z",
+            "updatedAt": "2026-04-02T00:00:00Z",
+            "cashFlowBucket": "spending",
+            "assignments": [],
+            "netAmount": -30.0,
+            "visibleSpendingAmount": 30.0
+        }))
+        .unwrap();
+        let item = transaction_item(row).unwrap();
+        let mut fields: Vec<&str> = item
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        fields.sort_unstable();
+        assert_eq!(fields, EXPECTED_FIELDS);
+        assert_eq!(item["notes"], "Weekly shop");
+        assert!(!item.to_string().contains("TESCO"));
     }
 }

@@ -639,6 +639,14 @@ pub fn map_broker_activity(
             (unit_price, quantity, fee, amount, currency_code)
         };
 
+    // The provider's text is both the starting notes and the imported
+    // description; only the notes are the user's to edit afterwards.
+    let notes = activity
+        .description
+        .clone()
+        .filter(|d| !d.trim().is_empty())
+        .or(activity.external_reference_id.clone());
+
     Some(NewActivity {
         id: Some(activity_id),
         account_id: account_id.to_string(),
@@ -655,11 +663,8 @@ pub fn map_broker_activity(
         // Review confidence is orthogonal to lifecycle. A review flag must not
         // silently remove an otherwise posted broker event from calculations.
         status: Some(wealthfolio_core::activities::ActivityStatus::Posted),
-        notes: activity
-            .description
-            .clone()
-            .filter(|d| !d.trim().is_empty())
-            .or(activity.external_reference_id.clone()),
+        notes: notes.clone(),
+        imported_description: notes,
         fx_rate,
         metadata,
         needs_review: Some(needs_review_flag),
@@ -850,6 +855,40 @@ mod tests {
         assert!(has_warning_reasons(&["Ambiguous mapping".to_string()]));
         assert!(!has_warning_reasons(&["Matched by symbol".to_string()]));
         assert!(!has_warning_reasons(&[]));
+    }
+
+    /// The provider's text starts as the notes and is kept as the imported
+    /// description; without a description, the external reference stands in.
+    #[test]
+    fn map_broker_activity_keeps_the_provider_text_as_the_imported_description() {
+        let activity =
+            |description: Option<&str>, reference: Option<&str>| AccountUniversalActivity {
+                id: Some("act-1".to_string()),
+                activity_type: Some("WITHDRAWAL".to_string()),
+                provider_type: Some("snaptrade".to_string()),
+                amount: Some(-12.5),
+                description: description.map(str::to_string),
+                external_reference_id: reference.map(str::to_string),
+                ..Default::default()
+            };
+        for (description, reference, expected) in [
+            (
+                Some("NETFLIX.COM 866"),
+                Some("ext-1"),
+                Some("NETFLIX.COM 866"),
+            ),
+            (None, Some("ext-1"), Some("ext-1")),
+            (Some("   "), Some("ext-1"), Some("ext-1")),
+            (None, None, None),
+        ] {
+            let mapped = map_test_activity(&activity(description, reference));
+            assert_eq!(mapped.notes.as_deref(), expected, "{description:?}");
+            assert_eq!(
+                mapped.imported_description.as_deref(),
+                expected,
+                "{description:?}"
+            );
+        }
     }
 
     #[test]

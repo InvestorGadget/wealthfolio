@@ -349,6 +349,7 @@ mod tests {
         currency: &str,
     ) -> Activity {
         Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: account_id.to_string(),
             asset_id: None,

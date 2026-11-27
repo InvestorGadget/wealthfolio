@@ -227,6 +227,15 @@ const COLUMN_ALIASES: Record<string, string[]> = {
     "remarks",
     "details",
   ],
+  // The column an activities export writes the bank's text to. Plain
+  // "description" stays the comment's: most files have only that one.
+  [ImportFormat.IMPORTED_DESCRIPTION]: [
+    "importeddescription",
+    "imported description",
+    "imported_description",
+    "bank description",
+    "bankdescription",
+  ],
   [ImportFormat.FX_RATE]: [
     "fxrate",
     "fx rate",

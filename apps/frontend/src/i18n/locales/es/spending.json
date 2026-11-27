@@ -198,6 +198,8 @@
     "categorizeHint": "Selecciona transacciones de un mismo grupo de flujo de caja no neutral para categorizarlas",
     "tagEvent": "Etiquetar evento",
     "deselect": "Deseleccionar transacción",
+    "bankText": "Descripción del banco: {{text}}",
+    "bankDescription": "Descripción del banco",
     "select": "Seleccionar transacción",
     "review": "Revisar",
     "neutral": "Neutral",
@@ -977,6 +979,8 @@
     "tagEventOptional": "Etiquetar un evento (opcional)",
     "notesPayee": "Notas / Beneficiario",
     "notesPlaceholder": "p. ej., AMAZON*MARKETPLACE, STARBUCKS COFFEE",
+    "bankDescription": "Descripción del banco",
+    "bankDescriptionHint": "Tal como se importó. Las reglas comparan este texto, digan lo que digan las notas.",
     "updateTransaction": "Actualizar transacción",
     "createTransaction": "Crear transacción",
     "typeChange": {

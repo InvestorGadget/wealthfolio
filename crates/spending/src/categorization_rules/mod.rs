@@ -1,6 +1,7 @@
 //! Activity rules — pattern-based auto-categorization for activities.
-//! On activity create, the rule with the highest priority that matches `notes`
-//! (and optionally `activity_type`) wins; its category assignment is created.
+//! The rule with the highest priority that matches an activity's bank text
+//! (its imported description, else its notes; `Activity::bank_text`) and
+//! optionally its `activity_type` wins; its category assignment is created.
 
 pub mod matcher;
 pub mod model;

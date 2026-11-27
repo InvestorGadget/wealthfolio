@@ -67,6 +67,7 @@ mod tests {
 
     fn create_test_activity() -> Activity {
         Activity {
+            imported_description: None,
             id: "test-id".to_string(),
             account_id: "account-1".to_string(),
             asset_id: Some("AAPL".to_string()),
@@ -306,6 +307,7 @@ mod tests {
 
     fn create_test_new_activity() -> NewActivity {
         NewActivity {
+            imported_description: None,
             id: None,
             account_id: "account-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -953,6 +955,7 @@ mod tests {
     #[test]
     fn test_new_activity_symbol_helpers() {
         let activity = NewActivity {
+            imported_description: None,
             id: Some("a1".to_string()),
             account_id: "acc-1".to_string(),
             asset: Some(AssetResolutionInput {
@@ -990,6 +993,7 @@ mod tests {
     #[test]
     fn test_activity_import_to_new_activity_preserves_asset_resolution_inputs() {
         let import = ActivityImport {
+            imported_description: None,
             id: Some("imp-1".to_string()),
             date: "2024-01-15".to_string(),
             symbol: "AZN".to_string(),
@@ -1044,6 +1048,7 @@ mod tests {
         // Regression: issue #927 — external transfer from CSV import was losing the
         // `is_external` flag because `From<ActivityImport>` hard-coded `metadata: None`.
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "AAPL".to_string(),
@@ -1140,6 +1145,7 @@ mod tests {
     fn test_activity_import_to_new_activity_preserves_credit_boundary_metadata() {
         for (subtype, is_external) in [("REFUND", true), ("BONUS", false)] {
             let import = ActivityImport {
+                imported_description: None,
                 id: None,
                 date: "2024-01-15".to_string(),
                 symbol: String::new(),
@@ -1193,6 +1199,7 @@ mod tests {
     #[test]
     fn test_activity_import_to_new_activity_omits_metadata_when_not_external() {
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "AAPL".to_string(),
@@ -1238,6 +1245,7 @@ mod tests {
     #[test]
     fn test_activity_import_to_new_activity_ignores_external_flag_for_non_transfers() {
         let import = ActivityImport {
+            imported_description: None,
             id: None,
             date: "2024-01-15".to_string(),
             symbol: "AAPL".to_string(),
@@ -1340,5 +1348,70 @@ mod tests {
         let converted = NewActivity::from(import);
         assert!(converted.source_record_id.is_none());
         assert!(converted.metadata.is_none());
+    }
+
+    #[test]
+    fn bank_text_prefers_the_imported_description_and_falls_back_to_notes() {
+        assert_eq!(
+            bank_text(Some("TESCO STORES 3301"), Some("Weekly shop")),
+            Some("TESCO STORES 3301")
+        );
+        assert_eq!(bank_text(None, Some("Weekly shop")), Some("Weekly shop"));
+        assert_eq!(
+            bank_text(Some("  "), Some("Weekly shop")),
+            Some("Weekly shop")
+        );
+        assert_eq!(bank_text(None, Some(" ")), None);
+        assert_eq!(bank_text(None, None), None);
+        assert_eq!(stored_imported_description(Some(" \t")), None);
+        assert_eq!(
+            stored_imported_description(Some(" AS SENT ")).as_deref(),
+            Some(" AS SENT ")
+        );
+    }
+
+    #[test]
+    fn imported_description_is_read_from_an_import_row_and_written_on_an_activity() {
+        let import: ActivityImport = serde_json::from_value(json!({
+            "date": "2024-01-15",
+            "symbol": "",
+            "activityType": "WITHDRAWAL",
+            "amount": 12,
+            "currency": "USD",
+            "accountId": "acc-1",
+            "isDraft": false,
+            "isValid": true,
+            "comment": "Coffee",
+            "importedDescription": "POS 4411 BLUE BOTTLE"
+        }))
+        .unwrap();
+        let converted = NewActivity::from(import);
+        assert_eq!(converted.notes.as_deref(), Some("Coffee"));
+        assert_eq!(
+            converted.imported_description.as_deref(),
+            Some("POS 4411 BLUE BOTTLE")
+        );
+        // A create request cannot carry it back out or in.
+        let request = serde_json::to_value(&converted).unwrap();
+        assert!(request.get("importedDescription").is_none());
+
+        let activity: Activity = serde_json::from_value(json!({
+            "id": "a1",
+            "accountId": "acc-1",
+            "activityType": "WITHDRAWAL",
+            "status": "POSTED",
+            "activityDate": "2024-01-15T00:00:00Z",
+            "currency": "USD",
+            "notes": "Coffee",
+            "importedDescription": "POS 4411 BLUE BOTTLE",
+            "createdAt": "2024-01-15T00:00:00Z",
+            "updatedAt": "2024-01-15T00:00:00Z"
+        }))
+        .unwrap();
+        assert_eq!(activity.bank_text(), Some("POS 4411 BLUE BOTTLE"));
+        assert_eq!(
+            serde_json::to_value(&activity).unwrap()["importedDescription"],
+            "POS 4411 BLUE BOTTLE"
+        );
     }
 }

@@ -19,7 +19,10 @@ vi.mock("../hooks/use-spending-events", () => ({
   useEventSpendingSummaries: () => ({ data: [], isLoading: false }),
 }));
 vi.mock("./event-dialog-provider", () => ({
-  useEventDialog: () => ({ openEventDialog: vi.fn(), openEventTypeDialog: vi.fn() }),
+  useEventDialog: () => ({
+    openEventDialog: vi.fn(),
+    openEventTypeDialog: vi.fn(),
+  }),
 }));
 // Anything these rows reach for goes through Tauri's IPC bridge, which does not
 // exist under jsdom: the call rejects, the failure is logged, and the logger is
@@ -261,6 +264,116 @@ describe("payee", () => {
     );
 
     expect(screen.getAllByText("Corner shop")).toHaveLength(2);
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+  });
+});
+
+describe("bank text", () => {
+  function renderBoth(overrides: Partial<CashActivity>) {
+    const row = toRowVM(activity(overrides), new Map());
+    return render(
+      <>
+        <TransactionCard row={row} selectionMode={false} {...shared} />
+        <Table>
+          <TableBody>
+            <TransactionRow row={row} {...shared} />
+          </TableBody>
+        </Table>
+      </>,
+      { wrapper: withProviders },
+    );
+  }
+
+  it("titles an edited import with the notes and shows the bank's text muted apart", () => {
+    renderBoth({
+      importedDescription: "TESCO STORES 3301",
+      notes: "Weekly shop",
+    });
+
+    // Once on the card and once in the row, each.
+    expect(screen.getAllByText("Weekly shop")).toHaveLength(2);
+    const bankTexts = screen.getAllByText("TESCO STORES 3301");
+    expect(bankTexts).toHaveLength(2);
+    for (const text of bankTexts) {
+      expect(text).toHaveClass("text-muted-foreground", "text-xs");
+    }
+    // Said in words too, not by position and colour alone.
+    expect(screen.getAllByText("Bank description: TESCO STORES 3301")).toHaveLength(2);
+  });
+
+  it("shows the text once when the notes are still the bank's", () => {
+    renderBoth({
+      importedDescription: "TESCO STORES 3301",
+      notes: "TESCO STORES 3301 ",
+    });
+
+    expect(screen.getAllByText("TESCO STORES 3301")).toHaveLength(2);
+    expect(screen.queryByText(/Bank description/)).not.toBeInTheDocument();
+  });
+
+  it("titles a manual entry with its notes, as before", () => {
+    renderBoth({ importedDescription: null, notes: "Corner shop" });
+
+    expect(screen.getAllByText("Corner shop")).toHaveLength(2);
+    expect(screen.queryByText(/Bank description/)).not.toBeInTheDocument();
+  });
+
+  it("falls back to the bank's text as the title when the notes were cleared", () => {
+    renderBoth({ importedDescription: "TESCO STORES 3301", notes: "" });
+
+    expect(screen.getAllByText("TESCO STORES 3301")).toHaveLength(2);
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Bank description/)).not.toBeInTheDocument();
+  });
+});
+
+describe("payee and bank text together", () => {
+  it("leads with the payee, then the notes, with the bank's text on its own muted line", () => {
+    const row = toRowVM(
+      activity({
+        importedDescription: "TESCO STORES 3301",
+        notes: "Weekly shop",
+      }),
+      new Map(),
+    );
+    render(
+      <>
+        <TransactionCard row={row} selectionMode={false} {...shared} payeeName="Tesco" />
+        <Table>
+          <TableBody>
+            <TransactionRow row={row} {...shared} payeeName="Tesco" />
+          </TableBody>
+        </Table>
+      </>,
+      { wrapper: withProviders },
+    );
+
+    expect(screen.getAllByText("Tesco")).toHaveLength(2);
+    expect(screen.getAllByText("Weekly shop")).toHaveLength(2);
+    expect(screen.getAllByText("TESCO STORES 3301")).toHaveLength(2);
+    expect(screen.getAllByText("Bank description: TESCO STORES 3301")).toHaveLength(2);
+  });
+
+  it("shows the bank's text once after the payee when the notes were cleared", () => {
+    const row = toRowVM(
+      activity({ importedDescription: "TESCO STORES 3301", notes: "" }),
+      new Map(),
+    );
+    render(
+      <>
+        <TransactionCard row={row} selectionMode={false} {...shared} payeeName="Tesco" />
+        <Table>
+          <TableBody>
+            <TransactionRow row={row} {...shared} payeeName="Tesco" />
+          </TableBody>
+        </Table>
+      </>,
+      { wrapper: withProviders },
+    );
+
+    expect(screen.getAllByText("Tesco")).toHaveLength(2);
+    expect(screen.getAllByText("TESCO STORES 3301")).toHaveLength(2);
+    expect(screen.queryByText(/Bank description/)).not.toBeInTheDocument();
     expect(screen.queryByText("—")).not.toBeInTheDocument();
   });
 });

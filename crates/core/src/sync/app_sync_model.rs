@@ -110,6 +110,10 @@ pub enum SyncEntity {
     Quote,
     AssetTaxonomyAssignment,
     Activity,
+    /// An activity's imported description, sent apart from the activity row:
+    /// clients from before the column reject a row that carries it, and skip
+    /// this entity. A receiver stores it only while its own is empty.
+    ActivityImportedDescription,
     BrokerActivityUserPatch,
     ActivityImportProfile,
     ImportTemplate,
@@ -205,6 +209,7 @@ impl SyncEntity {
             | SyncEntity::Asset
             | SyncEntity::AssetTaxonomyAssignment
             | SyncEntity::Activity
+            | SyncEntity::ActivityImportedDescription
             | SyncEntity::ActivityImportProfile
             | SyncEntity::Goal
             | SyncEntity::GoalsAllocation
@@ -461,6 +466,7 @@ mod tests {
             SyncEntity::Quote,
             SyncEntity::AssetTaxonomyAssignment,
             SyncEntity::Activity,
+            SyncEntity::ActivityImportedDescription,
             SyncEntity::BrokerActivityUserPatch,
             SyncEntity::ActivityImportProfile,
             SyncEntity::Goal,
@@ -507,6 +513,7 @@ mod tests {
             "\"quote\"",
             "\"asset_taxonomy_assignment\"",
             "\"activity\"",
+            "\"activity_imported_description\"",
             "\"broker_activity_user_patch\"",
             "\"activity_import_profile\"",
             "\"goal\"",

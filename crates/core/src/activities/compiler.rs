@@ -210,6 +210,7 @@ mod tests {
 
     fn create_test_activity() -> Activity {
         Activity {
+            imported_description: None,
             id: "test-1".to_string(),
             account_id: "account-1".to_string(),
             asset_id: Some("AAPL".to_string()),

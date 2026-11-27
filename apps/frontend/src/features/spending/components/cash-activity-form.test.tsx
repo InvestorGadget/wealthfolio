@@ -295,6 +295,40 @@ describe("CashActivityForm currency", () => {
   });
 });
 
+describe("CashActivityForm bank description", () => {
+  const imported = {
+    ...foreignCharge,
+    notes: "Coffee with Sam",
+    importedDescription: "SQ *MORNING OWL 4411",
+  } as unknown as Activity;
+
+  it("shows the imported text read-only and saves only the notes", async () => {
+    const user = userEvent.setup();
+    render(<CashActivityForm open onOpenChange={vi.fn()} activity={imported} />, { wrapper });
+
+    expect(await screen.findByText("SQ *MORNING OWL 4411")).toBeInTheDocument();
+    expect(screen.getByText("Bank description")).toBeInTheDocument();
+    // Only the notes are a field.
+    expect(screen.queryByDisplayValue("SQ *MORNING OWL 4411")).not.toBeInTheDocument();
+    const notes = screen.getByDisplayValue("Coffee with Sam");
+    await user.clear(notes);
+    await user.type(notes, "Team coffee");
+    await user.click(screen.getByRole("button", { name: /update/i }));
+
+    await waitFor(() => expect(updateActivity).toHaveBeenCalled());
+    const update = vi.mocked(updateActivity).mock.calls.at(-1)?.[0];
+    expect(update).toMatchObject({ id: "act-1", comment: "Team coffee" });
+    expect(update).not.toHaveProperty("importedDescription");
+  });
+
+  it("shows nothing extra for a manual entry", async () => {
+    render(<CashActivityForm open onOpenChange={vi.fn()} activity={foreignCharge} />, { wrapper });
+
+    await screen.findByDisplayValue("Sq *Morning Owl");
+    expect(screen.queryByText("Bank description")).not.toBeInTheDocument();
+  });
+});
+
 describe("CashActivityForm type change", () => {
   const typeChange = enSpending.cashForm.typeChange;
   const untracked = enSpending.cashForm.linkRow.untracked;

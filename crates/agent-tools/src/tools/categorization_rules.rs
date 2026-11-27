@@ -172,8 +172,9 @@ impl AgentTool for ListCategorizationRules {
     fn description(&self) -> &'static str {
         "List the saved transaction categorization rules: the user's own, rules \
          installed from a bundled country preset, and rules an add-on saved \
-         (origin user/preset/addon). Each rule matches an activity's notes by \
-         `pattern` and `matchType`, optionally only for one `activityType`, an \
+         (origin user/preset/addon). Each rule matches an activity's bank \
+         description (falls back to notes) by `pattern` and `matchType`, \
+         optionally only for one `activityType`, an \
          amount condition or one account, and assigns `categoryId` in \
          `taxonomyId`. A rule with `payeeConditionId` only matches activities \
          filed under that payee; when it has no text condition its `pattern` \

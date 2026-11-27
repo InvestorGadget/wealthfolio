@@ -2634,6 +2634,7 @@ mod tests {
     ) -> Activity {
         let now = Utc::now();
         Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: account_id.to_string(),
             asset_id: asset_id.map(str::to_string),

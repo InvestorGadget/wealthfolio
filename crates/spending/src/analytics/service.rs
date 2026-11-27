@@ -1879,6 +1879,7 @@ mod tests {
         crate::activity_assignments::ActivityTaxonomyAssignment,
     ) {
         let activity = Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: "card-account".to_string(),
             asset_id: None,

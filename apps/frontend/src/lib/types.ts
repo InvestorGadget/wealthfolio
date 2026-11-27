@@ -179,6 +179,11 @@ export interface Activity {
 
   // Metadata
   notes?: string;
+  /**
+   * The description the bank, broker or import file sent, as received. Set
+   * by imports and never edited; absent on manual entries.
+   */
+  importedDescription?: string | null;
   metadata?: Record<string, unknown>;
 
   /**
@@ -270,6 +275,8 @@ export interface ActivityDetails {
   currency: string;
   needsReview: boolean;
   comment?: string;
+  /** The description the bank, broker or import file sent; `comment` is the user's notes. */
+  importedDescription?: string | null;
   fxRate?: string | null;
   createdAt: Date;
   assetId: string;

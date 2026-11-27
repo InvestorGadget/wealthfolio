@@ -2241,6 +2241,7 @@ impl ActivityService {
                     amount: Some(amount),
                     status: None,
                     notes: source.notes.clone(),
+                    imported_description: None,
                     fx_rate: None,
                     metadata: Self::internal_transfer_metadata(),
                     needs_review: None,
@@ -3210,6 +3211,7 @@ impl ActivityService {
             currency: create.currency.clone(),
             fx_rate: create.fx_rate,
             notes: None,
+            imported_description: None,
             metadata: None,
             source_system: create.source_system.clone(),
             source_record_id: create.source_record_id.clone(),
@@ -3398,6 +3400,7 @@ impl ActivityService {
                 amount: Some(values.source_amount),
                 status: None,
                 notes: request.notes.clone(),
+                imported_description: None,
                 fx_rate: None,
                 metadata: metadata.clone(),
                 needs_review: None,
@@ -3422,6 +3425,7 @@ impl ActivityService {
                 amount: Some(values.destination_amount),
                 status: None,
                 notes: request.notes.clone(),
+                imported_description: None,
                 fx_rate: None,
                 metadata,
                 needs_review: None,
@@ -8828,6 +8832,7 @@ impl ActivityServiceTrait for ActivityService {
             .extend(self.find_duplicates_imported_without_source_ids(rows_to_check())?);
 
         let mut duplicate_count = 0u32;
+        let mut duplicate_descriptions: Vec<(String, String)> = Vec::new();
         let mut insertable_positions: Vec<usize> = Vec::with_capacity(new_activities.len());
         let mut insertable_source_keys = HashSet::new();
 
@@ -8873,6 +8878,11 @@ impl ActivityServiceTrait for ActivityService {
                         import_activity.duplicate_of_id = Some(existing_id.clone());
                     }
                     duplicate_count += 1;
+                    // The activity is already held; its imported description
+                    // is filled from this row if it has none.
+                    if let Some(description) = activity.imported_description.clone() {
+                        duplicate_descriptions.push((existing_id.clone(), description));
+                    }
                 }
                 continue;
             }
@@ -9065,6 +9075,11 @@ impl ActivityServiceTrait for ActivityService {
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
+
+        // A re-imported row never replaces a stored imported description.
+        self.activity_repository
+            .fill_missing_imported_descriptions(duplicate_descriptions)
+            .await?;
 
         // ── 9. Insert all non-duplicate activities in one transaction ────────
         let persisted_sources = insertable_sources
@@ -10481,6 +10496,7 @@ mod reviewed_import_metadata_tests {
         quote_mode: Option<&str>,
     ) -> ActivityImport {
         ActivityImport {
+            imported_description: None,
             id: None,
             date: "2026-01-01".to_string(),
             symbol: symbol.to_string(),

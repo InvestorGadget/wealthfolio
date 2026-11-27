@@ -340,6 +340,7 @@ mod tests {
         source_group_id: Option<&str>,
     ) -> Activity {
         Activity {
+            imported_description: None,
             id: "activity-1".to_string(),
             account_id: "account-1".to_string(),
             asset_id: None,

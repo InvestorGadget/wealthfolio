@@ -98,6 +98,10 @@ pub struct Proposal {
     pub amount: f64,
     pub currency: String,
     pub notes: Option<String>,
+    /// The description the bank or import sent, when the activity has one
+    /// that differs from its notes. Rules and payee history read this text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bank_description: Option<String>,
     pub taxonomy_id: String,
     pub category_id: String,
     pub category_path: String,
@@ -115,6 +119,10 @@ pub struct UnproposedActivity {
     pub amount: f64,
     pub currency: String,
     pub notes: Option<String>,
+    /// The description the bank or import sent, when the activity has one
+    /// that differs from its notes. Rules and payee history read this text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bank_description: Option<String>,
     pub reason: String,
     /// Only this taxonomy is compatible with the current cash-flow bucket.
     #[serde(default)]
@@ -330,8 +338,15 @@ pub async fn compute_categorization_state(
         let amount = act.amount.and_then(|d| d.to_f64()).unwrap_or(0.0);
         let date = act.activity_date.format("%Y-%m-%d").to_string();
         let notes_trimmed = act.notes.as_deref().map(truncate_notes);
+        // Rules and history read the bank's text; the model is shown it
+        // beside the notes when the user has written their own.
+        let bank_description = act
+            .imported_description
+            .as_deref()
+            .filter(|text| !text.trim().is_empty() && Some(*text) != act.notes.as_deref())
+            .map(truncate_notes);
 
-        let notes = act.notes.as_deref().unwrap_or("");
+        let notes = act.bank_text().unwrap_or("");
         let notes_upper = notes.to_uppercase();
         let mut rule_input = RuleInput {
             notes_upper: &notes_upper,
@@ -367,6 +382,7 @@ pub async fn compute_categorization_state(
                         amount,
                         currency: act.currency.clone(),
                         notes: notes_trimmed.clone(),
+                        bank_description: bank_description.clone(),
                         taxonomy_id: tax_id,
                         category_id: cat_id,
                         category_path: path.clone(),
@@ -379,6 +395,8 @@ pub async fn compute_categorization_state(
             }
         }
 
+        // Payee history is keyed on the notes the examples show; only rule
+        // matching reads the bank's text.
         let history_match = act
             .notes
             .as_deref()
@@ -414,6 +432,7 @@ pub async fn compute_categorization_state(
                     amount,
                     currency: act.currency.clone(),
                     notes: notes_trimmed,
+                    bank_description: bank_description.clone(),
                     taxonomy_id: tax_id,
                     category_id: cat_id,
                     category_path: path.clone(),
@@ -431,6 +450,7 @@ pub async fn compute_categorization_state(
             amount,
             currency: act.currency.clone(),
             notes: notes_trimmed,
+            bank_description,
             reason: "No rule or history match — needs AI or manual judgement.".to_string(),
             allowed_taxonomy_id: Some(expected_taxonomy.to_string()),
         });
@@ -718,6 +738,8 @@ impl AgentTool for ListCategorizationContext {
          `needsAiJudgement` is 0, call it with `aiProposals: []`; otherwise infer the best \
          `taxonomyId` + `categoryKey` pair for each `unproposed` row from `taxonomies` \
          using `examples` + merchant-name knowledge, then pass those as `aiProposals`. \
+         A row's `bankDescription`, when present, is the bank's original text and the \
+         one rules match; its `notes` are the user's own. \
          Never tell the user categories were applied from this context result alone. \
          Do NOT pass `accountIds` for generic mentions like 'credit card' — the \
          spending settings already restrict to opted-in accounts."
@@ -1014,6 +1036,7 @@ mod tests {
         };
         CashActivity {
             activity: Activity {
+                imported_description: None,
                 id: id.to_string(),
                 account_id: account_id.to_string(),
                 asset_id: None,

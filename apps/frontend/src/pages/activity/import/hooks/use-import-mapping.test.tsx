@@ -129,6 +129,26 @@ describe("CSV column auto-mapping", () => {
   });
 
   it.each([CASH_TRANSACTION_IMPORT_PROFILE, CREDIT_CARD_TRANSACTION_IMPORT_PROFILE])(
+    "maps an exported bank description apart from the comment ($label)",
+    (profile) => {
+      // The headers an activities export writes.
+      expect(
+        initializeColumnMapping(
+          ["date", "activityType", "amount", "comment", "importedDescription"],
+          profile,
+        ),
+      ).toMatchObject({ comment: "comment", importedDescription: "importedDescription" });
+      expect(
+        initializeColumnMapping(["Date", "Description", "Bank description", "Amount"], profile),
+      ).toMatchObject({ comment: "Description", importedDescription: "Bank description" });
+      // A bank file's only description column stays the comment.
+      expect(
+        initializeColumnMapping(["Date", "Transaction Description", "Amount"], profile),
+      ).not.toHaveProperty("importedDescription");
+    },
+  );
+
+  it.each([CASH_TRANSACTION_IMPORT_PROFILE, CREDIT_CARD_TRANSACTION_IMPORT_PROFILE])(
     "treats a bank's Amount column as canonical alongside Debit and Credit ($label)",
     (profile) => {
       expect(

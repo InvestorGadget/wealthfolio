@@ -198,6 +198,8 @@
     "categorizeHint": "Sélectionnez des transactions d'un même compartiment de flux de trésorerie non neutre pour les catégoriser",
     "tagEvent": "Associer un événement",
     "deselect": "Désélectionner la transaction",
+    "bankText": "Libellé bancaire : {{text}}",
+    "bankDescription": "Libellé bancaire",
     "select": "Sélectionner la transaction",
     "review": "À vérifier",
     "neutral": "Neutre",
@@ -977,6 +979,8 @@
     "tagEventOptional": "Associer un événement (facultatif)",
     "notesPayee": "Notes / Bénéficiaire",
     "notesPlaceholder": "ex. : AMAZON*MARKETPLACE, STARBUCKS COFFEE",
+    "bankDescription": "Libellé bancaire",
+    "bankDescriptionHint": "Tel qu'importé. Les règles s'appliquent à ce texte, quelles que soient les notes.",
     "updateTransaction": "Mettre à jour la transaction",
     "createTransaction": "Créer la transaction",
     "typeChange": {

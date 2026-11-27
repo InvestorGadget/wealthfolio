@@ -390,7 +390,9 @@ impl CategorizationRulesService {
         let mut writes: Vec<NewActivityTaxonomyAssignment> = Vec::with_capacity(activities.len());
         for row in &activities {
             let a = &row.activity;
-            let notes_raw = a.notes.as_deref().unwrap_or("");
+            // Rules read the text the bank sent, so editing the notes of an
+            // imported activity does not change what matches it.
+            let notes_raw = a.bank_text().unwrap_or("");
             let notes_upper = notes_raw.to_uppercase();
             let mut input = RuleInput {
                 notes_upper: &notes_upper,
@@ -1219,6 +1221,7 @@ mod tests {
 
     fn mk_activity(id: &str, account: &str, notes: &str) -> Activity {
         Activity {
+            imported_description: None,
             id: id.to_string(),
             account_id: account.to_string(),
             asset_id: None,
@@ -3157,5 +3160,58 @@ mod tests {
         let replaced = svc.upsert(named).await.unwrap();
         assert_eq!(replaced.set_payee_id.as_deref(), Some("payee_netflix"));
         assert_eq!(replaced.payee_condition_id, None);
+    }
+
+    /// Rules read the text the bank sent, so rewriting an imported
+    /// activity's notes neither loses nor gains it a match; an activity
+    /// without an imported description is matched on its notes as before.
+    #[tokio::test]
+    async fn rerun_matches_the_imported_description_and_falls_back_to_notes() {
+        let with_description = |id: &str, notes: &str, description: &str| {
+            let mut activity = mk_activity(id, "acct1", notes);
+            activity.imported_description = Some(description.to_string());
+            activity
+        };
+        let activities = vec![
+            with_description("edited", "Weekly shop", "TESCO STORES 3301"),
+            with_description("notes-mention", "Not TESCO this time", "SHELL 0042"),
+            with_description("blank-description", "TESCO EXPRESS", "   "),
+            mk_activity("manual", "acct1", "TESCO lunch"),
+            mk_activity("other", "acct1", "Lunch"),
+        ];
+        let rule = || mk_rule("r1", "TESCO", "spending_categories", "cat_groceries", 5);
+        let written_ids = |repo: &MockAssignmentRepo| {
+            let writes = repo.writes.lock().unwrap();
+            let mut ids: Vec<String> = writes.iter().map(|w| w.activity_id.clone()).collect();
+            ids.sort();
+            ids
+        };
+
+        let (svc, _, assignment_repo) = mk_svc(vec![rule()], activities.clone());
+        assert_eq!(
+            svc.rerun_all(&["acct1".to_string()], false).await.unwrap(),
+            3
+        );
+        let written = written_ids(&assignment_repo);
+        assert_eq!(written, vec!["blank-description", "edited", "manual"]);
+
+        // Without imported descriptions the same rows match on notes alone.
+        let notes_only = activities
+            .into_iter()
+            .map(|mut activity| {
+                activity.imported_description = None;
+                activity
+            })
+            .collect();
+        let (svc, _, assignment_repo) = mk_svc(vec![rule()], notes_only);
+        assert_eq!(
+            svc.rerun_all(&["acct1".to_string()], false).await.unwrap(),
+            3
+        );
+        let written = written_ids(&assignment_repo);
+        assert_eq!(
+            written,
+            vec!["blank-description", "manual", "notes-mention"]
+        );
     }
 }

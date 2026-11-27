@@ -807,6 +807,7 @@ impl FactLookup<'_> {
             .clone()
             .unwrap_or_else(|| self.account_currency[spec.account.as_str()].to_string());
         Activity {
+            imported_description: None,
             id: spec.id.clone(),
             account_id: spec.account.clone(),
             asset_id: spec.asset.clone(),
