@@ -1,33 +1,33 @@
-import { useId } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, Switch } from "@wealthfolio/ui";
 
 import {
-  DEFAULT_RULE_SUGGESTION_PREFERENCES,
-  RULE_SUGGESTIONS_STORAGE_KEY,
+  readRuleSuggestionPreferences,
   ruleSuggestionsActive,
+  updateRuleSuggestionPreferences,
   type RuleSuggestionPreferences,
 } from "@/features/spending/lib/rule-suggestion-preferences";
-import { usePersistentState } from "@/hooks/use-persistent-state";
 
 /**
  * "Suggest rules after I categorize": whether filing a transaction by hand
  * offers to make a rule of it. Kept on this device, with what the prompt
  * itself remembers ("Not today", "Don't suggest for this payee").
+ *
+ * Read and written through the same functions as the prompt: each change is
+ * made to what is stored at that moment, so switching this does not undo a
+ * snooze or a silenced payee the prompt has stored since the page opened.
  */
 export function RuleSuggestionsToggle() {
   const { t } = useTranslation();
-  const [preferences, setPreferences] = usePersistentState<RuleSuggestionPreferences>(
-    RULE_SUGGESTIONS_STORAGE_KEY,
-    DEFAULT_RULE_SUGGESTION_PREFERENCES,
-  );
+  const [preferences, setPreferences] = useState(readRuleSuggestionPreferences);
+  const change = (next: (current: RuleSuggestionPreferences) => RuleSuggestionPreferences) =>
+    setPreferences(updateRuleSuggestionPreferences(next));
   const labelId = useId();
   const descriptionId = useId();
-  const enabled = preferences.enabled !== false;
-  const mutedPayeeIds = preferences.mutedPayeeIds ?? [];
-  const held =
-    enabled && (mutedPayeeIds.length > 0 || !ruleSuggestionsActive({ ...preferences, enabled }));
+  const { enabled, mutedPayeeIds } = preferences;
+  const held = enabled && (mutedPayeeIds.length > 0 || !ruleSuggestionsActive(preferences));
 
   return (
     <div className="border-border/60 bg-card/40 rounded-md border px-3 py-2.5">
@@ -44,7 +44,7 @@ export function RuleSuggestionsToggle() {
           aria-labelledby={labelId}
           aria-describedby={descriptionId}
           checked={enabled}
-          onCheckedChange={(next) => setPreferences((current) => ({ ...current, enabled: next }))}
+          onCheckedChange={(next) => change((current) => ({ ...current, enabled: next }))}
         />
       </div>
       {held && (
@@ -56,7 +56,7 @@ export function RuleSuggestionsToggle() {
             size="sm"
             className="h-6 text-xs"
             onClick={() =>
-              setPreferences((current) => ({ ...current, snoozedUntil: null, mutedPayeeIds: [] }))
+              change((current) => ({ ...current, snoozedUntil: null, mutedPayeeIds: [] }))
             }
           >
             {t("settings:spending.rule_suggestions.resume")}

@@ -14,7 +14,10 @@ import {
 import type { CategorizationRunSummary } from "../types/rule";
 
 interface RuleApplyDialogProps {
-  /** What running the rules on uncategorized transactions would change; null closes the dialog. */
+  /**
+   * What the saved rule would do to uncategorized transactions, as a preview
+   * narrowed to that rule returns it; null closes the dialog.
+   */
   preview: CategorizationRunSummary | null;
   isApplying?: boolean;
   onApply: () => void;
@@ -40,13 +43,15 @@ export function RuleApplyDialog({
   children,
 }: RuleApplyDialogProps) {
   const { t } = useTranslation();
-  const kept = preview?.protectedManual ?? 0;
+  // Counted in transactions: a rule that sets a payee and a category fills one
+  // transaction, not two. "Kept" are those filed by hand under something else.
+  const kept = preview?.keptManualActivities ?? 0;
   return (
     <AlertDialog open={!!preview} onOpenChange={(open) => !open && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {t("spending:ruleSuggestion.applyTitle", { count: preview?.eligible ?? 0 })}
+            {t("spending:ruleSuggestion.applyTitle", { count: preview?.changedActivities ?? 0 })}
           </AlertDialogTitle>
           <AlertDialogDescription>
             {kept > 0

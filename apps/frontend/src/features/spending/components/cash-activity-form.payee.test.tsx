@@ -30,7 +30,11 @@ const onFile = vi.hoisted(() => ({ payees: [] as unknown[], payeeName: "" }));
 vi.mock("../hooks/use-activity-payee", () => ({
   useActivityPayee: () => ({ payees: onFile.payees, payeeName: onFile.payeeName }),
 }));
-vi.mock("../lib/payee", () => ({ PAYEES_TAXONOMY_ID: "payees", setActivityPayee: vi.fn() }));
+vi.mock("../lib/payee", async (importOriginal) => ({
+  PAYEES_TAXONOMY_ID: "payees",
+  findPayee: (await importOriginal<typeof import("../lib/payee")>()).findPayee,
+  setActivityPayee: vi.fn(),
+}));
 vi.mock("../adapters/cash-activities", () => ({
   assignActivityCategory: vi.fn(),
   unassignActivityCategory: vi.fn(),
@@ -497,6 +501,22 @@ describe("CashActivityForm rule suggestion", () => {
     expect(suggestAfterEdit).toHaveBeenCalledWith(["act-1"], {
       category: undefined,
       payeeChanged: true,
+    });
+  });
+
+  it("compares the payee with the one on file when the form opened, as a payee", async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    // On file under another spelling of the same payee.
+    onFile.payeeName = "CITY WATER ";
+    render(<CashActivityForm open onOpenChange={onOpenChange} activity={charge} />, { wrapper });
+    await pickPayee(user, "City Water");
+    await save(user, onOpenChange);
+
+    expect(setActivityPayee).toHaveBeenCalledTimes(1);
+    expect(suggestAfterEdit).toHaveBeenCalledWith(["act-1"], {
+      category: undefined,
+      payeeChanged: false,
     });
   });
 

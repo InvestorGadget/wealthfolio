@@ -74,7 +74,7 @@ import {
   unassignActivityCategory,
 } from "../adapters/cash-activities";
 import { useActivityPayee } from "../hooks/use-activity-payee";
-import { PAYEES_TAXONOMY_ID, setActivityPayee } from "../lib/payee";
+import { findPayee, PAYEES_TAXONOMY_ID, setActivityPayee } from "../lib/payee";
 import type { ManualEdit } from "../lib/rule-suggestion";
 import { PayeeField } from "./payee-field";
 import { useRuleSuggestions } from "./rule-suggestion-provider";
@@ -230,6 +230,8 @@ interface SaveSession {
   unrefreshed: boolean;
   /** A save succeeded while this was still the form's opening, and closed it. */
   closedBySave: boolean;
+  /** The payee on file when the form opened; unset until it is known. */
+  openedPayeeName?: string;
   /** What the saves filed the transaction under by hand, for the rule offered once saved. */
   filed: ManualEdit;
   /** Each one as last written; unset while it is still as the form opened with. */
@@ -240,6 +242,13 @@ interface SaveSession {
     payeeName?: string;
   };
 }
+/** Whether two names are one payee: the same payee by id, else the same name. */
+const isSamePayee = (a: string, b: string, payees: TaxonomyCategory[]): boolean => {
+  const first = findPayee(payees, a);
+  const second = findPayee(payees, b);
+  if (first && second) return first.id === second.id;
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+};
 const newSaveSession = (): SaveSession => ({
   createdId: null,
   unrefreshed: false,
@@ -352,6 +361,12 @@ export function CashActivityForm({
   }, [open, activity?.id]);
   useEffect(() => {
     if (open && !payeeEdited.current) setPayeeName(savedPayeeName);
+    // What the transaction was filed under when the form opened, to tell
+    // afterwards whether a save refiled it. It can load late, but once a save
+    // of this opening has written the payee, what is on file is that write.
+    if (open && session.current.written.payeeName === undefined) {
+      session.current.openedPayeeName = savedPayeeName;
+    }
   }, [open, activity?.id, savedPayeeName]);
   const changePayeeName = (name: string) => {
     payeeEdited.current = true;
@@ -607,7 +622,9 @@ export function CashActivityForm({
           written.category && written.category !== openedCategory
             ? { taxonomyId: filedTaxonomy, categoryId: filedCategory }
             : undefined,
-        payeeChanged: !!written.payeeName && written.payeeName !== savedPayeeName.trim(),
+        payeeChanged:
+          !!written.payeeName &&
+          !isSamePayee(written.payeeName, saving.openedPayeeName ?? savedPayeeName, payees),
       };
 
       saving.createdId = null;

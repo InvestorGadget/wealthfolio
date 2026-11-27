@@ -1,5 +1,13 @@
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -104,6 +112,7 @@ export function RuleSuggestionProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [formRequest, setFormRequest] = useState<RuleFormRequest | null>(null);
   const [applyPreview, setApplyPreview] = useState<CategorizationRunSummary | null>(null);
+  const latestRequest = useRef(0);
 
   const openForm = useCallback((request: Omit<RuleFormRequest, "key">) => {
     setFormRequest((previous) => ({ ...request, key: (previous?.key ?? 0) + 1 }));
@@ -123,7 +132,7 @@ export function RuleSuggestionProvider({ children }: { children: ReactNode }) {
   );
 
   const showSuggestion = useCallback(
-    async (suggestion: RuleSuggestion) => {
+    async (suggestion: RuleSuggestion, isLatest: () => boolean) => {
       const payeeName = await categoryName(qc, t, PAYEES_TAXONOMY_ID, suggestion.payeeId);
       let title: string;
       let description: string;
@@ -155,6 +164,7 @@ export function RuleSuggestionProvider({ children }: { children: ReactNode }) {
         onAction = () => openForm({ prefill });
       }
       // Asked again here: the names above took a moment to load.
+      if (!isLatest()) return;
       if (!mayOfferRuleSuggestion(readRuleSuggestionPreferences(), suggestion.payeeId)) return;
       const dismiss = () => toast.dismiss(TOAST_ID);
       const { payeeId } = suggestion;
@@ -193,20 +203,25 @@ export function RuleSuggestionProvider({ children }: { children: ReactNode }) {
   );
 
   const suggestAfterEdit = useCallback(
-    (activityIds: string[], edit: ManualEdit) => {
+    (edited: string[], edit: ManualEdit) => {
+      const activityIds = [...new Set(edited)];
       if (activityIds.length === 0 || (!edit.category && !edit.payeeChanged)) return;
       // Switched off or snoozed: nothing is read, let alone shown.
       if (!ruleSuggestionsActive(readRuleSuggestionPreferences())) return;
+      // The offer is about the latest edit. One still being worked out when
+      // another edit is made is dropped, however late its answer comes.
+      const request = ++latestRequest.current;
+      const isLatest = () => latestRequest.current === request;
       void (async () => {
         try {
           const explanations = await explainActivityRules(activityIds);
           // Every edited transaction has to be accounted for, or what they
           // share is not known.
-          if (explanations.length !== activityIds.length) return;
+          if (!isLatest() || explanations.length !== activityIds.length) return;
           const suggestion = buildRuleSuggestion(explanations, edit);
           if (!suggestion) return;
           if (!mayOfferRuleSuggestion(readRuleSuggestionPreferences(), suggestion.payeeId)) return;
-          await showSuggestion(suggestion);
+          await showSuggestion(suggestion, isLatest);
         } catch {
           // The edit is saved; a suggestion that cannot be worked out is not offered.
         }
@@ -280,17 +295,23 @@ function SuggestedRuleForm({
   const save = useSaveRuleWithoutApplying();
 
   const handleSave = async (values: RuleFormValues) => {
+    let saved: CategorizationRule;
     try {
       // Saved without being applied: whether to file what it matches is asked next.
-      await save.mutateAsync({ rule: newRuleFromFormValues(values), id: request.rule?.id });
+      saved = await save.mutateAsync({
+        rule: newRuleFromFormValues(values),
+        id: request.rule?.id,
+      });
     } catch {
       // The mutation reports the error; the form stays open to try again.
       return;
     }
     onClose();
     try {
-      const preview = await previewCategorizationRulesRerun(true);
-      if (preview.eligible > 0) onSaved(preview);
+      // What this rule alone would fill, in transactions: other rules' matches
+      // and what they keep are not this question's.
+      const preview = await previewCategorizationRulesRerun(true, { ruleIds: [saved.id] });
+      if (preview.changedActivities > 0) onSaved(preview);
     } catch {
       // The rule is saved; it applies on the next import or rerun.
     }
@@ -310,7 +331,14 @@ function SuggestedRuleForm({
   );
 }
 
-/** Runs the rules on what has no category yet, once the user says so. */
+/**
+ * Runs the rules on what has no category yet, once the user says so.
+ *
+ * The count shown is the saved rule's; the run is the ordinary one over every
+ * rule, exactly what saving a rule anywhere else starts by itself. Rules are
+ * normally kept applied to uncategorized transactions, so the two agree; where
+ * another rule had not been applied yet, this run files its matches as well.
+ */
 function ApplySuggestedRule({
   preview,
   onClose,

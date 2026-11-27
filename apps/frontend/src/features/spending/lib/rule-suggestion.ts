@@ -89,20 +89,27 @@ function shared<T>(values: (T | null | undefined)[]): T | undefined {
 type RuleVerdict =
   /** Every transaction already gets the chosen value from a rule. */
   | { state: "done" }
-  /** One rule gives every transaction another value. */
+  /** One rule gives another value, to all of them or to those it applies to. */
   | { state: "differs"; applied: AppliedRule }
   /** No rule applies to any of them. */
   | { state: "none" }
-  /** Some are covered, or by different rules. */
-  | { state: "mixed" };
+  /** Some already get the chosen value and no rule touches the rest. */
+  | { state: "partial" }
+  /** Different rules give other values: there is no one rule to change. */
+  | { state: "conflict" };
 
 function verdict(rules: (AppliedRule | null | undefined)[], chosen: string): RuleVerdict {
   if (rules.every((applied) => applied?.categoryId === chosen)) return { state: "done" };
   if (rules.every((applied) => !applied)) return { state: "none" };
-  const ruleId = shared(rules.map((applied) => applied?.rule.id));
-  const [first] = rules;
-  if (ruleId && first && first.categoryId !== chosen) return { state: "differs", applied: first };
-  return { state: "mixed" };
+  const differing = rules.filter(
+    (applied): applied is AppliedRule => !!applied && applied.categoryId !== chosen,
+  );
+  if (differing.length === 0) return { state: "partial" };
+  // A new rule beside one that says otherwise would only compete with it.
+  const [first] = differing;
+  return differing.every((applied) => applied.rule.id === first.rule.id)
+    ? { state: "differs", applied: first }
+    : { state: "conflict" };
 }
 
 const textDraft = (
@@ -138,9 +145,10 @@ const payeeDraft = (
  * No rule is offered when the rules already give what the user chose; when one
  * rule gives something else, that rule is offered for editing instead.
  *
- * A category is matched on the payee, and for one transaction without a payee
- * on its exact bank text. A payee is matched on the exact bank text. Several
- * transactions are only matched on what they all share.
+ * A category is matched on the payee when a rule files the transactions under
+ * it, else on the exact bank text (which then sets a hand-set payee too). A
+ * payee is matched on the exact bank text. Several transactions are only
+ * matched on what they all share.
  */
 export function buildRuleSuggestion(
   explanations: ActivityRuleExplanation[],
@@ -155,9 +163,14 @@ export function buildRuleSuggestion(
   const bankText = tidyText
     ? (explanations.find((explained) => explained.bankText !== tidyText)?.bankText ?? tidyText)
     : null;
-  const payeeRules = explanations.map((explained) => explained.payeeRule);
-  // A payee the user cleared leaves nothing to make a payee rule of.
-  const payee = edit.payeeChanged && payeeId ? verdict(payeeRules, payeeId) : null;
+  // What the rules make of the payee these are filed under. A payee the user
+  // cleared leaves nothing to ask about.
+  const payee = payeeId
+    ? verdict(
+        explanations.map((explained) => explained.payeeRule),
+        payeeId,
+      )
+    : null;
 
   if (edit.category) {
     const category = verdict(
@@ -167,22 +180,31 @@ export function buildRuleSuggestion(
     if (category.state === "differs") {
       return { kind: "update", applied: category.applied, payeeId };
     }
+    if (category.state === "conflict") return null;
     if (category.state !== "done") {
       if (payee && payeeId) {
-        // The category rule would match on the payee, which a rule files
-        // these under another: that rule comes first.
-        if (payee.state === "differs") return { kind: "update", applied: payee.applied, payeeId };
-        // No rule knows the payee yet: one rule sets both from the text.
-        if (payee.state === "none" && bankText) {
+        // The user has just set this payee and a rule files these under
+        // another: that rule comes first, the category would follow it.
+        if (edit.payeeChanged && payee.state === "differs") {
+          return { kind: "update", applied: payee.applied, payeeId };
+        }
+        // A rule files them under this payee, so a rule can match on it.
+        if (payee.state === "done") {
+          return { kind: "create", draft: payeeDraft(payeeId, edit.category), payeeId, bankText };
+        }
+        // No rule does: the payee is there by hand, and a rule matching on
+        // it would never meet an imported transaction. It matches on the
+        // text instead, and sets the payee too when no rule sets any.
+        if (bankText) {
           return {
             kind: "create",
-            draft: textDraft(bankText, edit.category, payeeId),
+            draft: textDraft(bankText, edit.category, payee.state === "none" ? payeeId : null),
             payeeId,
             bankText,
           };
         }
-      }
-      if (payeeId) {
+        // Nothing but the payee is shared: a rule on it still files what the
+        // user gives that payee.
         return { kind: "create", draft: payeeDraft(payeeId, edit.category), payeeId, bankText };
       }
       if (single && bankText) {
@@ -192,8 +214,8 @@ export function buildRuleSuggestion(
     }
   }
 
-  if (!payee || !payeeId) return null;
-  if (payee.state === "done") return null;
+  if (!edit.payeeChanged || !payee || !payeeId) return null;
+  if (payee.state === "done" || payee.state === "conflict") return null;
   if (payee.state === "differs") return { kind: "update", applied: payee.applied, payeeId };
   if (!bankText) return null;
   return {
@@ -206,7 +228,8 @@ export function buildRuleSuggestion(
 
 /**
  * The rule the form opens with for "Create rule" on a transaction: matched on
- * its payee, else on its exact bank text, and setting the category it has.
+ * the payee a rule gives it, else on its exact bank text, and setting the
+ * category it has.
  */
 export function ruleDraftForActivity(
   explained: ActivityRuleExplanation,
@@ -216,7 +239,11 @@ export function ruleDraftForActivity(
     taxonomyId: category?.taxonomyId ?? null,
     categoryId: category?.categoryId ?? null,
   };
-  if (explained.payeeId) {
+  const hasText = !!explained.bankText?.trim();
+  // On the payee when a rule files the transaction under it, or when there is
+  // no text to match instead. A payee set by hand is matched on the text, as
+  // in `buildRuleSuggestion`: imports only get a payee from a rule.
+  if (explained.payeeId && (explained.payeeRule?.categoryId === explained.payeeId || !hasText)) {
     return {
       pattern: "",
       matchType: "contains",
@@ -225,8 +252,11 @@ export function ruleDraftForActivity(
       setPayeeId: null,
     };
   }
-  const condition = explained.bankText?.trim()
-    ? bankTextCondition(explained.bankText)
-    : { pattern: "", matchType: "contains" as const };
-  return { ...condition, ...target, payeeConditionId: null, setPayeeId: null };
+  const setPayeeId =
+    explained.payeeId && !explained.payeeRule && category ? explained.payeeId : null;
+  const condition =
+    explained.bankText && hasText
+      ? bankTextCondition(explained.bankText)
+      : { pattern: "", matchType: "contains" as const };
+  return { ...condition, ...target, payeeConditionId: null, setPayeeId };
 }

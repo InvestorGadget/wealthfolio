@@ -25,8 +25,9 @@ import {
 
 const mocks = vi.hoisted(() => ({
   explain: vi.fn<(ids: string[]) => Promise<unknown[]>>(),
-  preview: vi.fn<(onlyUncategorized: boolean) => Promise<unknown>>(),
-  save: vi.fn<(change: { rule: unknown; id?: string }) => Promise<void>>(),
+  preview:
+    vi.fn<(onlyUncategorized: boolean, scope?: { ruleIds?: string[] }) => Promise<unknown>>(),
+  save: vi.fn<(change: { rule: unknown; id?: string }) => Promise<{ id: string }>>(),
   rerun: vi.fn<(onlyUncategorized: boolean, options?: { onSettled?: () => void }) => void>(),
   // The prompt sonner was last asked to show, and how it was asked.
   shown: null as null | ReactElement,
@@ -121,10 +122,16 @@ vi.mock("./rule-edit-modal", () => ({
 }));
 
 const groceries = { taxonomyId: "spending_categories", categoryId: "cat_groceries" };
+// Filed under Tesco by a payee rule, so a rule can match on the payee.
 const withPayee: ActivityRuleExplanation = {
   activityId: "a1",
   bankText: "TESCO STORES 3301",
   payeeId: "payee_tesco",
+  payeeRule: {
+    rule: { id: "payee-rule", name: "Tesco" } as CategorizationRule,
+    taxonomyId: "payees",
+    categoryId: "payee_tesco",
+  },
 };
 const summary = (fields: Partial<CategorizationRunSummary>): CategorizationRunSummary => ({
   matched: 0,
@@ -136,6 +143,11 @@ const summary = (fields: Partial<CategorizationRunSummary>): CategorizationRunSu
   unchanged: 0,
   incompatible: 0,
   withoutTarget: 0,
+  changedActivities: 0,
+  keptManualActivities: 0,
+  keptManualCategories: 0,
+  keptManualPayees: 0,
+  replacedManualActivities: 0,
   ...fields,
 });
 
@@ -177,7 +189,7 @@ beforeEach(() => {
   mocks.dismissed = [];
   mocks.explain.mockReset().mockResolvedValue([withPayee]);
   mocks.preview.mockReset().mockResolvedValue(summary({}));
-  mocks.save.mockReset().mockResolvedValue(undefined);
+  mocks.save.mockReset().mockResolvedValue({ id: "r-saved" });
   mocks.rerun.mockReset();
   mocks.toastError.mockReset();
 });
@@ -317,6 +329,35 @@ describe("RuleSuggestionProvider", () => {
     expect(mocks.shown).toBeNull();
   });
 
+  it("offers the rule for the latest edit when an earlier answer comes back late", async () => {
+    let answerFirst: (rows: unknown[]) => void = () => undefined;
+    mocks.explain
+      .mockReturnValueOnce(new Promise<unknown[]>((resolve) => (answerFirst = resolve)))
+      .mockResolvedValueOnce([{ activityId: "a2", bankText: "SHELL 0042" }]);
+    renderProvider();
+    act(() => api.suggestAfterEdit(["a1"], { category: groceries }));
+    act(() => api.suggestAfterEdit(["a2"], { category: groceries }));
+    const view = await prompt();
+    expect(view.getByRole("group")).toHaveAccessibleDescription(
+      "Set Groceries whenever the bank's text is “SHELL 0042”.",
+    );
+
+    // The first edit's answer arrives now: it must not take the prompt over.
+    const shown = mocks.shown;
+    await act(async () => {
+      answerFirst([withPayee]);
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    });
+    expect(mocks.shown).toBe(shown);
+  });
+
+  it("asks about each transaction once, however often it is named", async () => {
+    renderProvider();
+    act(() => api.suggestAfterEdit(["a1", "a1"], { category: groceries }));
+    await prompt();
+    expect(mocks.explain).toHaveBeenCalledWith(["a1"]);
+  });
+
   it("stays quiet when the read fails: the edit is saved either way", async () => {
     mocks.explain.mockRejectedValue(new Error("offline"));
     renderProvider();
@@ -402,7 +443,9 @@ describe("RuleSuggestionProvider", () => {
     }
 
     it("offers to apply it to the uncategorized transactions it matches", async () => {
-      mocks.preview.mockResolvedValue(summary({ eligible: 3, protectedManual: 2 }));
+      mocks.preview.mockResolvedValue(
+        summary({ eligible: 6, protectedManual: 5, changedActivities: 3, keptManualActivities: 2 }),
+      );
       const user = await saveSuggestedRule();
 
       const saved = mocks.save.mock.calls[0][0];
@@ -414,8 +457,9 @@ describe("RuleSuggestionProvider", () => {
         isGlobal: true,
       });
       const dialog = await screen.findByRole("alertdialog");
-      // Only what has no category yet is ever previewed or run.
-      expect(mocks.preview).toHaveBeenCalledWith(true);
+      // Only what has no category yet is previewed, and only for the rule
+      // that was just saved.
+      expect(mocks.preview).toHaveBeenCalledWith(true, { ruleIds: ["r-saved"] });
       expect(dialog).toHaveTextContent("Apply to 3 matching uncategorized transactions?");
       expect(dialog).toHaveTextContent(
         "2 transactions you categorized by hand are kept as they are.",
@@ -428,7 +472,7 @@ describe("RuleSuggestionProvider", () => {
     });
 
     it("runs nothing when the offer is declined", async () => {
-      mocks.preview.mockResolvedValue(summary({ eligible: 1 }));
+      mocks.preview.mockResolvedValue(summary({ eligible: 2, changedActivities: 1 }));
       const user = await saveSuggestedRule();
 
       const dialog = await screen.findByRole("alertdialog");
@@ -442,9 +486,11 @@ describe("RuleSuggestionProvider", () => {
     });
 
     it("does not ask when there is nothing to apply it to", async () => {
-      mocks.preview.mockResolvedValue(summary({ eligible: 0, protectedManual: 4 }));
+      mocks.preview.mockResolvedValue(summary({ changedActivities: 0, keptManualActivities: 4 }));
       await saveSuggestedRule();
-      await waitFor(() => expect(mocks.preview).toHaveBeenCalledWith(true));
+      await waitFor(() =>
+        expect(mocks.preview).toHaveBeenCalledWith(true, { ruleIds: ["r-saved"] }),
+      );
       await settle();
       expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     });

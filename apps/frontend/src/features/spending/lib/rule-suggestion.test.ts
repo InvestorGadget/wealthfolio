@@ -61,10 +61,16 @@ describe("suggestedRuleName", () => {
 });
 
 describe("buildRuleSuggestion", () => {
-  it("matches a category on the payee the transaction has", () => {
-    const suggestion = buildRuleSuggestion([explained("a1", { payeeId: "payee_tesco" })], {
-      category: groceries,
-    });
+  it("matches a category on the payee a rule files the transaction under", () => {
+    const suggestion = buildRuleSuggestion(
+      [
+        explained("a1", {
+          payeeId: "payee_tesco",
+          payeeRule: applied("payee-rule", "payees", "payee_tesco"),
+        }),
+      ],
+      { category: groceries },
+    );
     expect(suggestion).toEqual({
       kind: "create",
       payeeId: "payee_tesco",
@@ -77,6 +83,43 @@ describe("buildRuleSuggestion", () => {
         payeeConditionId: "payee_tesco",
         setPayeeId: null,
       },
+    });
+  });
+
+  // A rule on a payee only fires once something files the transaction under
+  // it. Imports get a payee from a rule alone, so a payee set by hand that no
+  // rule sets would leave the new rule waiting for ever.
+  it("matches on the bank text, and sets the payee, when the payee is only there by hand", () => {
+    const byHand = [explained("a1", { payeeId: "payee_tesco" })];
+    expect(buildRuleSuggestion(byHand, { category: groceries })).toMatchObject({
+      kind: "create",
+      payeeId: "payee_tesco",
+      draft: {
+        pattern: "TESCO STORES 3301",
+        matchType: "exact",
+        categoryId: "cat_groceries",
+        payeeConditionId: null,
+        setPayeeId: "payee_tesco",
+      },
+    });
+
+    // A rule files these under another payee: the new rule leaves payees alone.
+    const otherwise = [
+      explained("a1", {
+        payeeId: "payee_tesco",
+        payeeRule: applied("payee-rule", "payees", "payee_asda"),
+      }),
+    ];
+    expect(buildRuleSuggestion(otherwise, { category: groceries })).toMatchObject({
+      kind: "create",
+      draft: { pattern: "TESCO STORES 3301", payeeConditionId: null, setPayeeId: null },
+    });
+
+    // With no text to match, the payee is all there is.
+    const textless = [explained("a1", { payeeId: "payee_tesco", bankText: null })];
+    expect(buildRuleSuggestion(textless, { category: groceries })).toMatchObject({
+      kind: "create",
+      draft: { pattern: "", payeeConditionId: "payee_tesco" },
     });
   });
 
@@ -269,7 +312,10 @@ describe("buildRuleSuggestion", () => {
     it("applies the guard to all of them", () => {
       const covered = applied("r1", SPENDING, "cat_groceries");
       const other = applied("r2", SPENDING, "cat_dining");
-      const payee = { payeeId: "payee_tesco" };
+      const payee = {
+        payeeId: "payee_tesco",
+        payeeRule: applied("payee-rule", "payees", "payee_tesco"),
+      };
       // All covered: nothing to offer.
       expect(
         buildRuleSuggestion(
@@ -297,19 +343,70 @@ describe("buildRuleSuggestion", () => {
           { category: groceries },
         ),
       ).toMatchObject({ kind: "create", draft: { payeeConditionId: "payee_tesco" } });
+      // One rule gives some of them something else: a new rule would compete
+      // with it, so that rule is the one to change.
+      expect(
+        buildRuleSuggestion(
+          [
+            explained("a1", { ...payee, categoryRule: other }),
+            explained("a2", { ...payee, categoryRule: covered }),
+            explained("a3", payee),
+          ],
+          { category: groceries },
+        ),
+      ).toMatchObject({ kind: "update", applied: other });
+      // Different rules say otherwise: there is no one rule to offer.
+      expect(
+        buildRuleSuggestion(
+          [
+            explained("a1", { ...payee, categoryRule: other }),
+            explained("a2", { ...payee, categoryRule: applied("r3", SPENDING, "cat_fuel") }),
+          ],
+          { category: groceries },
+        ),
+      ).toBeNull();
+    });
+
+    it("offers no payee rule when different rules set other payees", () => {
+      const rows = [
+        explained("a1", {
+          payeeId: "payee_tesco",
+          payeeRule: applied("p1", "payees", "payee_asda"),
+        }),
+        explained("a2", {
+          payeeId: "payee_tesco",
+          payeeRule: applied("p2", "payees", "payee_lidl"),
+        }),
+      ];
+      expect(buildRuleSuggestion(rows, { payeeChanged: true })).toBeNull();
     });
   });
 });
 
 describe("ruleDraftForActivity", () => {
-  it("matches on the payee and sets the category the transaction has", () => {
-    expect(ruleDraftForActivity(explained("a1", { payeeId: "payee_tesco" }), groceries)).toEqual({
+  it("matches on the payee a rule gives it and sets the category the transaction has", () => {
+    const filed = explained("a1", {
+      payeeId: "payee_tesco",
+      payeeRule: applied("payee-rule", "payees", "payee_tesco"),
+    });
+    expect(ruleDraftForActivity(filed, groceries)).toEqual({
       pattern: "",
       matchType: "contains",
       taxonomyId: SPENDING,
       categoryId: "cat_groceries",
       payeeConditionId: "payee_tesco",
       setPayeeId: null,
+    });
+  });
+
+  it("matches on the bank text and sets a payee that is only there by hand", () => {
+    expect(ruleDraftForActivity(explained("a1", { payeeId: "payee_tesco" }), groceries)).toEqual({
+      pattern: "TESCO STORES 3301",
+      matchType: "exact",
+      taxonomyId: SPENDING,
+      categoryId: "cat_groceries",
+      payeeConditionId: null,
+      setPayeeId: "payee_tesco",
     });
   });
 

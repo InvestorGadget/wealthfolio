@@ -157,7 +157,13 @@ test("a category set by hand offers a rule, which is created and applied only on
   const apply = page.getByRole("alertdialog");
   await expect(apply).toContainText("Apply to 1 matching uncategorized transaction?");
   await expect(apply).toContainText("categorized by hand");
-  expect(await assignments(other.id)).toEqual([]);
+  // An ordinary rule save files what it matches in the background within
+  // moments (checked at the end of this test). This one must not: give that
+  // run every chance to happen before taking the empty result at its word.
+  for (let waited = 0; waited < 4000; waited += 500) {
+    expect(await assignments(other.id)).toEqual([]);
+    await page.waitForTimeout(500);
+  }
   await apply.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(apply).not.toBeVisible();
 

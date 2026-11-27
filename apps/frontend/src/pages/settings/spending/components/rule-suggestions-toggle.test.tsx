@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   muteRuleSuggestionsForPayee,
   readRuleSuggestionPreferences,
+  RULE_SUGGESTIONS_STORAGE_KEY,
   ruleSuggestionsActive,
   snoozeRuleSuggestions,
 } from "@/features/spending/lib/rule-suggestion-preferences";
@@ -64,5 +65,26 @@ describe("RuleSuggestionsToggle", () => {
       enabled: false,
       mutedPayeeIds: ["payee_tesco"],
     });
+  });
+
+  it("does not undo what the prompt stored after the page opened", async () => {
+    const user = userEvent.setup();
+    render(<RuleSuggestionsToggle />);
+    // The prompt, elsewhere, while this page is open.
+    snoozeRuleSuggestions();
+    muteRuleSuggestionsForPayee("payee_tesco");
+
+    await user.click(screen.getByRole("switch"));
+    const stored = readRuleSuggestionPreferences();
+    expect(stored.enabled).toBe(false);
+    expect(stored.snoozedUntil).not.toBeNull();
+    expect(stored.mutedPayeeIds).toEqual(["payee_tesco"]);
+  });
+
+  it("reads a stored value without a snooze as not held", () => {
+    localStorage.setItem(RULE_SUGGESTIONS_STORAGE_KEY, JSON.stringify({ enabled: true }));
+    render(<RuleSuggestionsToggle />);
+    expect(screen.getByRole("switch")).toBeChecked();
+    expect(screen.queryByRole("button", { name: "Suggest again" })).not.toBeInTheDocument();
   });
 });
