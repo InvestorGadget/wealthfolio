@@ -376,6 +376,16 @@ async fn rerun_categorization_rules(
     axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(body): Json<RerunRulesBody>,
 ) -> ApiResult<Json<usize>> {
+    // This route runs on every Spending account. A body that asks for a
+    // scope is refused, not run unscoped.
+    if body.scope != RuleRunScope::default() {
+        return Err(anyhow::Error::from(
+            wealthfolio_spending::error::SpendingError::InvalidInput {
+                message: "This route does not take a scope; use the detailed rerun".to_string(),
+            },
+        )
+        .into());
+    }
     let s = state.spending_settings_service.get().await?;
     if !s.enabled {
         return Ok(Json(0));
@@ -394,7 +404,9 @@ async fn rerun_categorization_rules_detailed(
 ) -> ApiResult<Json<CategorizationRunSummary>> {
     let settings = state.spending_settings_service.get().await?;
     if !settings.enabled {
-        body.scope.manual_overrides().map_err(anyhow::Error::from)?;
+        body.scope
+            .manual_overrides(body.only_uncategorized)
+            .map_err(anyhow::Error::from)?;
         return Ok(Json(CategorizationRunSummary::default()));
     }
     Ok(Json(
@@ -411,7 +423,9 @@ async fn preview_categorization_rules_rerun(
 ) -> ApiResult<Json<CategorizationRunSummary>> {
     let settings = state.spending_settings_service.get().await?;
     if !settings.enabled {
-        body.scope.manual_overrides().map_err(anyhow::Error::from)?;
+        body.scope
+            .manual_overrides(body.only_uncategorized)
+            .map_err(anyhow::Error::from)?;
         return Ok(Json(CategorizationRunSummary::default()));
     }
     Ok(Json(
@@ -1012,10 +1026,18 @@ mod tests {
             }
         );
 
+        // A scope is how the unscoped route tells a body it must refuse.
+        assert_ne!(scoped.scope, RuleRunScope::default());
+        let explicit_default: RerunRulesBody = serde_json::from_value(
+            serde_json::json!({ "onlyUncategorized": true, "overrideManual": false }),
+        )
+        .unwrap();
+        assert_eq!(explicit_default.scope, RuleRunScope::default());
+
         // The override without a list is refused before anything runs.
         let unscoped: RerunRulesBody =
             serde_json::from_value(serde_json::json!({ "overrideManual": true })).unwrap();
-        assert!(unscoped.scope.manual_overrides().is_err());
+        assert!(unscoped.scope.manual_overrides(false).is_err());
     }
 
     #[test]

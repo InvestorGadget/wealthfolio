@@ -234,7 +234,8 @@ pub struct RuleRunScope {
     pub activity_ids: Option<Vec<String>>,
     /// Let a matching rule replace a category or payee the user set by hand,
     /// on the activities of `activity_ids`. Refused without `activity_ids`:
-    /// a whole-account run never replaces manual values.
+    /// a whole-account run never replaces manual values. Refused for an
+    /// uncategorized-only run too: that mode keeps every existing value.
     #[serde(default)]
     pub override_manual: bool,
 }
@@ -244,9 +245,15 @@ impl RuleRunScope {
     /// the override is on, and then exactly the listed ones.
     pub fn manual_overrides(
         &self,
+        only_uncategorized: bool,
     ) -> Result<std::collections::HashSet<String>, crate::error::SpendingError> {
         if !self.override_manual {
             return Ok(Default::default());
+        }
+        if only_uncategorized {
+            return Err(crate::error::SpendingError::InvalidInput {
+                message: "An uncategorized-only run cannot replace manual categories".to_string(),
+            });
         }
         match &self.activity_ids {
             Some(ids) => Ok(ids.iter().cloned().collect()),

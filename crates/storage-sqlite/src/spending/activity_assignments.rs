@@ -157,15 +157,17 @@ enum RuleDecision {
     Existing,
     Unchanged,
 }
-/// `replace_manual` is whether this item's activity is one the user allowed
-/// the run to replace hand-set values on. Everywhere else a manual assignment
-/// ends the decision, whatever the mode.
+/// `replace_manual_for` holds the activities the user allowed the run to
+/// replace hand-set values on. Everywhere else a manual assignment ends the
+/// decision, whatever the mode; and an uncategorized-only run keeps every
+/// existing value, so there the set is not consulted at all.
 fn rule_decision(
     conn: &mut SqliteConnection,
     item: &NewActivityTaxonomyAssignment,
     only_uncategorized: bool,
-    replace_manual: bool,
+    replace_manual_for: &HashSet<String>,
 ) -> wealthfolio_core::Result<RuleDecision> {
+    let replace_manual = !only_uncategorized && replace_manual_for.contains(&item.activity_id);
     // Splits stand in for the category, so a rule must not write one beside
     // them. A payee is not part of the split and can still be set.
     let replaces_splits = is_category_taxonomy(&item.taxonomy_id);
@@ -594,12 +596,8 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
         let mut tally = RuleTally::default();
         for item in items {
-            let decision = rule_decision(
-                &mut conn,
-                &item,
-                only_uncategorized,
-                replace_manual_for.contains(&item.activity_id),
-            )?;
+            let decision =
+                rule_decision(&mut conn, &item, only_uncategorized, &replace_manual_for)?;
             tally.count(&item, &decision);
         }
         Ok(tally.finish())
@@ -627,12 +625,8 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
             .exec_tx(move |tx| {
                 let mut tally = RuleTally::default();
                 for item in items {
-                    let decision = rule_decision(
-                        tx.conn(),
-                        &item,
-                        only_uncategorized,
-                        replace_manual_for.contains(&item.activity_id),
-                    )?;
+                    let decision =
+                        rule_decision(tx.conn(), &item, only_uncategorized, &replace_manual_for)?;
                     tally.count(&item, &decision);
                     let RuleDecision::Eligible { had_existing, .. } = decision else {
                         continue;
@@ -1535,7 +1529,8 @@ mod tests {
 
     #[tokio::test]
     async fn the_override_replaces_values_set_by_hand_only_on_the_listed_activities() {
-        for only_uncategorized in [true, false] {
+        {
+            let only_uncategorized = false;
             let (repo, _dir) = hand_categorized().await;
 
             let preview = repo
@@ -1572,6 +1567,36 @@ mod tests {
             );
             assert_eq!(
                 stored(&repo, "unlisted").await,
+                vec![
+                    row("payees", "payee_friend", "manual"),
+                    row("spending_categories", "cat_food", "manual"),
+                ]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_uncategorized_only_run_keeps_values_set_by_hand_whatever_it_is_given() {
+        // The service refuses this combination; the writer does not act on it either.
+        let (repo, _dir) = hand_categorized().await;
+
+        let preview = repo
+            .preview_rules_replacing_manual(rule_items(), true, only(&["listed"]))
+            .await
+            .expect("preview");
+        let result = repo
+            .assign_rules_replacing_manual(rule_items(), true, only(&["listed"]))
+            .await
+            .expect("run rules");
+
+        for summary in [&preview, &result] {
+            assert_eq!(summary.eligible, 0);
+            assert_eq!(summary.protected_manual, 4);
+            assert_eq!(summary.replaced_manual_activities, 0);
+        }
+        for activity in ["listed", "unlisted"] {
+            assert_eq!(
+                stored(&repo, activity).await,
                 vec![
                     row("payees", "payee_friend", "manual"),
                     row("spending_categories", "cat_food", "manual"),

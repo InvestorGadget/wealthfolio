@@ -318,7 +318,8 @@ impl CategorizationRulesService {
     /// With `scope.override_manual` a matching rule may also replace a value
     /// the user set by hand, on those activities only. That is the one path
     /// on which a rule run changes a manual assignment, so it is refused for
-    /// a run that names no activities. It replaces, never clears: an activity
+    /// a run that names no activities, and for an uncategorized-only run,
+    /// which keeps every existing value. It replaces, never clears: an activity
     /// no rule matches keeps what it has, and splits stay protected.
     pub async fn rerun_scoped(
         &self,
@@ -326,7 +327,7 @@ impl CategorizationRulesService {
         only_uncategorized: bool,
         scope: &RuleRunScope,
     ) -> Result<super::model::CategorizationRunSummary> {
-        let replace_manual_for = scope.manual_overrides()?;
+        let replace_manual_for = scope.manual_overrides(only_uncategorized)?;
         if account_ids.is_empty() {
             return Ok(Default::default());
         }
@@ -357,7 +358,7 @@ impl CategorizationRulesService {
         only_uncategorized: bool,
         scope: &RuleRunScope,
     ) -> Result<super::model::CategorizationRunSummary> {
-        let replace_manual_for = scope.manual_overrides()?;
+        let replace_manual_for = scope.manual_overrides(only_uncategorized)?;
         if account_ids.is_empty() {
             return Ok(Default::default());
         }
@@ -3456,6 +3457,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_override_is_refused_for_an_uncategorized_only_run() {
+        let (svc, _, assignments) = mk_payee_svc(
+            coffee_rules(),
+            vec![mk_activity("act", "acct1", "COFFEE SHOP")],
+            vec![mk_assignment(
+                "act",
+                "spending_categories",
+                "cat_gifts",
+                "manual",
+            )],
+        );
+        let accounts = ["acct1".to_string()];
+
+        let run = svc
+            .rerun_scoped(&accounts, true, &scope(&["act"], true))
+            .await;
+        let preview = svc
+            .preview_scoped(&accounts, true, &scope(&["act"], true))
+            .await;
+
+        for refused in [run, preview] {
+            let error = refused.expect_err("the override does not combine with this mode");
+            assert!(matches!(
+                error.downcast_ref::<SpendingError>(),
+                Some(SpendingError::InvalidInput { .. })
+            ));
+        }
+        assert!(applied(&assignments).is_empty());
+        assert_eq!(assignments.existing.lock().unwrap()[0].source, "manual");
+    }
+
+    #[tokio::test]
     async fn the_unscoped_entry_points_never_replace_manual_values() {
         let (svc, _, assignments) = mk_payee_svc(
             coffee_rules(),
@@ -3515,17 +3548,20 @@ mod tests {
     fn a_run_scope_defaults_to_an_unscoped_protected_run() {
         let scope: RuleRunScope = serde_json::from_value(serde_json::json!({})).unwrap();
         assert_eq!(scope, RuleRunScope::default());
-        assert!(scope.manual_overrides().unwrap().is_empty());
+        assert!(scope.manual_overrides(false).unwrap().is_empty());
 
         // The flag alone names no activities, listed or not.
         let listed: RuleRunScope =
             serde_json::from_value(serde_json::json!({ "activityIds": ["a", "b"] })).unwrap();
-        assert!(listed.manual_overrides().unwrap().is_empty());
+        assert!(listed.manual_overrides(false).unwrap().is_empty());
 
         let overriding: RuleRunScope = serde_json::from_value(
             serde_json::json!({ "activityIds": ["a", "b"], "overrideManual": true }),
         )
         .unwrap();
-        assert_eq!(overriding.manual_overrides().unwrap().len(), 2);
+        assert_eq!(overriding.manual_overrides(false).unwrap().len(), 2);
+        // An uncategorized-only run keeps every existing value, manual included.
+        assert!(overriding.manual_overrides(true).is_err());
+        assert!(listed.manual_overrides(true).unwrap().is_empty());
     }
 }

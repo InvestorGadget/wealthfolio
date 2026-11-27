@@ -27,7 +27,8 @@ export interface CategorizationRunScope {
   activityIds: string[];
   /**
    * Also replace categories and payees set by hand, where a rule matches. The
-   * server refuses it for a run that lists no transactions.
+   * server refuses it for a run that lists no transactions, and for an
+   * uncategorized-only run.
    */
   overrideManual?: boolean;
 }

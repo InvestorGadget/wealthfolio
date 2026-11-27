@@ -393,8 +393,15 @@ pub async fn delete_categorization_rule(id: String, state: ProfileAccess) -> Res
 #[tauri::command]
 pub async fn rerun_categorization_rules(
     only_uncategorized: bool,
+    activity_ids: Option<Vec<String>>,
+    override_manual: Option<bool>,
     state: ProfileAccess,
 ) -> Result<usize, String> {
+    // This command runs on every Spending account. A call that asks for a
+    // scope is refused, not run unscoped.
+    if activity_ids.is_some() || override_manual == Some(true) {
+        return Err("This command does not take a scope; use the detailed rerun".to_string());
+    }
     let context = state.context()?;
     let s = context
         .spending_settings_service()
@@ -432,7 +439,9 @@ pub async fn rerun_categorization_rules_detailed(
         .await
         .map_err(|e| format!("Failed to load spending settings: {}", e))?;
     if !settings.enabled {
-        scope.manual_overrides().map_err(|e| e.to_string())?;
+        scope
+            .manual_overrides(only_uncategorized)
+            .map_err(|e| e.to_string())?;
         return Ok(CategorizationRunSummary::default());
     }
     context
@@ -461,7 +470,9 @@ pub async fn preview_categorization_rules_rerun(
         .await
         .map_err(|e| format!("Failed to load spending settings: {}", e))?;
     if !settings.enabled {
-        scope.manual_overrides().map_err(|e| e.to_string())?;
+        scope
+            .manual_overrides(only_uncategorized)
+            .map_err(|e| e.to_string())?;
         return Ok(CategorizationRunSummary::default());
     }
     context
