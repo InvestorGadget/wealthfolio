@@ -330,9 +330,13 @@ pub async fn list_categorization_rules(
         .map_err(|e| format!("Failed to list rules: {}", e))
 }
 
+/// `defer_apply` saves the rule without the background categorize that
+/// follows a rule change: the caller asks the user first, then runs the rules
+/// itself. Left out, the rule is applied to uncategorized activities as ever.
 #[tauri::command]
 pub async fn create_categorization_rule(
     rule: NewCategorizationRule,
+    defer_apply: Option<bool>,
     state: ProfileAccess,
 ) -> Result<CategorizationRule, String> {
     let context = state.context()?;
@@ -341,7 +345,9 @@ pub async fn create_categorization_rule(
         .create(rule)
         .await
         .map_err(|e| format!("Failed to create rule: {}", e))?;
-    spawn_auto_categorize_for_opted_in_accounts(&context).await;
+    if !defer_apply.unwrap_or(false) {
+        spawn_auto_categorize_for_opted_in_accounts(&context).await;
+    }
     Ok(created)
 }
 
@@ -349,6 +355,7 @@ pub async fn create_categorization_rule(
 pub async fn update_categorization_rule(
     id: String,
     patch: UpdateCategorizationRule,
+    defer_apply: Option<bool>,
     state: ProfileAccess,
 ) -> Result<CategorizationRule, String> {
     let context = state.context()?;
@@ -357,7 +364,9 @@ pub async fn update_categorization_rule(
         .update(&id, patch)
         .await
         .map_err(|e| format!("Failed to update rule: {}", e))?;
-    spawn_auto_categorize_for_opted_in_accounts(&context).await;
+    if !defer_apply.unwrap_or(false) {
+        spawn_auto_categorize_for_opted_in_accounts(&context).await;
+    }
     Ok(updated)
 }
 

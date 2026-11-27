@@ -321,25 +321,40 @@ async fn list_categorization_rules(
     Ok(Json(state.categorization_rules_service.list().await?))
 }
 
+/// `deferApply=true` saves a rule without the background categorize that
+/// follows a rule change: the caller asks the user first, then runs the rules
+/// itself. Left out, the rule is applied to uncategorized activities as ever.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct RuleSaveQuery {
+    defer_apply: bool,
+}
+
 async fn create_categorization_rule(
     axum::Extension(state): axum::Extension<Arc<AppState>>,
+    Query(query): Query<RuleSaveQuery>,
     Json(payload): Json<NewCategorizationRule>,
 ) -> ApiResult<Json<CategorizationRule>> {
     let created = state.categorization_rules_service.create(payload).await?;
-    spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    if !query.defer_apply {
+        spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    }
     Ok(Json(created))
 }
 
 async fn update_categorization_rule(
     axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(id): Path<String>,
+    Query(query): Query<RuleSaveQuery>,
     Json(payload): Json<UpdateCategorizationRule>,
 ) -> ApiResult<Json<CategorizationRule>> {
     let updated = state
         .categorization_rules_service
         .update(&id, payload)
         .await?;
-    spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    if !query.defer_apply {
+        spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    }
     Ok(Json(updated))
 }
 

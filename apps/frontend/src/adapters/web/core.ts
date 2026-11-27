@@ -1557,13 +1557,22 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "list_rule_presets":
       break;
     case "create_categorization_rule": {
-      const { rule } = payload as { rule: Record<string, unknown> };
+      const { rule, deferApply } = payload as {
+        rule: Record<string, unknown>;
+        deferApply?: boolean;
+      };
+      if (deferApply) url += "?deferApply=true";
       body = JSON.stringify(rule);
       break;
     }
     case "update_categorization_rule": {
-      const { id, patch } = payload as { id: string; patch: Record<string, unknown> };
+      const { id, patch, deferApply } = payload as {
+        id: string;
+        patch: Record<string, unknown>;
+        deferApply?: boolean;
+      };
       url += `/${encodeURIComponent(id)}`;
+      if (deferApply) url += "?deferApply=true";
       body = JSON.stringify(patch);
       break;
     }

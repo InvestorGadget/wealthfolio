@@ -253,6 +253,38 @@ describe("adapter command parity", () => {
     });
   });
 
+  it("saves a rule without applying it only when asked to", async () => {
+    let mock = stubFetch({ id: "r1" });
+    await invoke("create_categorization_rule", { rule: { name: "Tesco" } });
+    expect(lastCall(mock)).toEqual({
+      url: "/api/v1/spending/rules",
+      method: "POST",
+      body: JSON.stringify({ name: "Tesco" }),
+    });
+    mock = stubFetch({ id: "r1" });
+    await invoke("update_categorization_rule", { id: "r1", patch: { name: "Tesco" } });
+    expect(lastCall(mock).url).toBe("/api/v1/spending/rules/r1");
+
+    mock = stubFetch({ id: "r1" });
+    await invoke("create_categorization_rule", { rule: { name: "Tesco" }, deferApply: true });
+    expect(lastCall(mock)).toEqual({
+      url: "/api/v1/spending/rules?deferApply=true",
+      method: "POST",
+      body: JSON.stringify({ name: "Tesco" }),
+    });
+    mock = stubFetch({ id: "r1" });
+    await invoke("update_categorization_rule", {
+      id: "r1",
+      patch: { name: "Tesco" },
+      deferApply: true,
+    });
+    expect(lastCall(mock)).toEqual({
+      url: "/api/v1/spending/rules/r1?deferApply=true",
+      method: "PUT",
+      body: JSON.stringify({ name: "Tesco" }),
+    });
+  });
+
   it("registers every command reachable from the web adapter", () => {
     const files = [
       ...collectSourceFiles(path.join(frontendSrcDir, "adapters/shared")),
