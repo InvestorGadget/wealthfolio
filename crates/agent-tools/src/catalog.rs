@@ -991,7 +991,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             result.content,
-            serde_json::json!({ "onlyUncategorized": true, "accounts": 2, "matched": 4, "eligible":0,"changed":0,"protectedSplits":0,"protectedManual":0,"skippedExisting":0,"unchanged":0,"incompatible":0,"withoutTarget":0 })
+            serde_json::json!({ "onlyUncategorized": true, "accounts": 2, "matched": 4, "eligible":0,"changed":0,"protectedSplits":0,"protectedManual":0,"skippedExisting":0,"unchanged":0,"incompatible":0,"withoutTarget":0,"changedActivities":0,"keptManualActivities":0,"keptManualCategories":0,"keptManualPayees":0,"replacedManualActivities":0 })
         );
         catalog
             .execute(

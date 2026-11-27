@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::cash_activities::CashActivityServiceTrait;
@@ -13,7 +13,7 @@ use super::matcher::{
 };
 use super::model::{
     is_text_condition, ActivityRuleExplanation, AppliedRule, CategorizationRule,
-    NewCategorizationRule, RuleAmountOp, RuleMatchType, UpdateCategorizationRule,
+    NewCategorizationRule, RuleAmountOp, RuleMatchType, RuleRunScope, UpdateCategorizationRule,
     NO_TEXT_CONDITION_PATTERN,
 };
 use super::presets::{self, ImportPresetResult, RemovePresetResult, RulePresetSummary};
@@ -311,15 +311,33 @@ impl CategorizationRulesService {
         account_ids: &[String],
         only_uncategorized: bool,
     ) -> Result<super::model::CategorizationRunSummary> {
+        self.rerun_scoped(account_ids, only_uncategorized, &RuleRunScope::default())
+            .await
+    }
+    /// [`Self::rerun_detailed`] narrowed to `scope.activity_ids`.
+    ///
+    /// With `scope.override_manual` a matching rule may also replace a value
+    /// the user set by hand, on those activities only. That is the one path
+    /// on which a rule run changes a manual assignment, so it is refused for
+    /// a run that names no activities. It replaces, never clears: an activity
+    /// no rule matches keeps what it has, and splits stay protected.
+    pub async fn rerun_scoped(
+        &self,
+        account_ids: &[String],
+        only_uncategorized: bool,
+        scope: &RuleRunScope,
+    ) -> Result<super::model::CategorizationRunSummary> {
+        let replace_manual_for = scope.manual_overrides()?;
         if account_ids.is_empty() {
             return Ok(Default::default());
         }
         let _guard = self.rerun_lock.lock().await;
-        let (matched, items, incompatible, without_target) =
-            self.plan_rerun(account_ids, only_uncategorized).await?;
+        let (matched, items, incompatible, without_target) = self
+            .plan_rerun(account_ids, only_uncategorized, scope)
+            .await?;
         let mut decisions = self
             .assignment_service
-            .apply_rules_detailed(items, only_uncategorized)
+            .apply_rules_detailed(items, only_uncategorized, replace_manual_for)
             .await?;
         decisions.incompatible = incompatible;
         decisions.without_target = without_target;
@@ -330,14 +348,26 @@ impl CategorizationRulesService {
         account_ids: &[String],
         only_uncategorized: bool,
     ) -> Result<super::model::CategorizationRunSummary> {
+        self.preview_scoped(account_ids, only_uncategorized, &RuleRunScope::default())
+            .await
+    }
+    /// What [`Self::rerun_scoped`] would do, without writing.
+    pub async fn preview_scoped(
+        &self,
+        account_ids: &[String],
+        only_uncategorized: bool,
+        scope: &RuleRunScope,
+    ) -> Result<super::model::CategorizationRunSummary> {
+        let replace_manual_for = scope.manual_overrides()?;
         if account_ids.is_empty() {
             return Ok(Default::default());
         }
-        let (matched, items, incompatible, without_target) =
-            self.plan_rerun(account_ids, only_uncategorized).await?;
+        let (matched, items, incompatible, without_target) = self
+            .plan_rerun(account_ids, only_uncategorized, scope)
+            .await?;
         let mut decisions = self
             .assignment_service
-            .preview_rules(items, only_uncategorized)
+            .preview_rules(items, only_uncategorized, replace_manual_for)
             .await?;
         decisions.incompatible = incompatible;
         decisions.without_target = without_target;
@@ -368,8 +398,14 @@ impl CategorizationRulesService {
         &self,
         account_ids: &[String],
         only_uncategorized: bool,
+        scope: &RuleRunScope,
     ) -> Result<(usize, Vec<NewActivityTaxonomyAssignment>, usize, usize)> {
-        let activities = self.cash_service.list_for_rules(account_ids).await?;
+        let mut activities = self.cash_service.list_for_rules(account_ids).await?;
+        if let Some(ids) = &scope.activity_ids {
+            let ids: HashSet<&str> = ids.iter().map(String::as_str).collect();
+            activities.retain(|row| ids.contains(row.activity.id.as_str()));
+        }
+        let replaces_manual = scope.override_manual;
 
         let rules = self.repo.list().await?;
         let known_payees = if RulePasses::needs_known_payees(&rules) {
@@ -386,7 +422,7 @@ impl CategorizationRulesService {
         let mut writes: Vec<NewActivityTaxonomyAssignment> = Vec::with_capacity(activities.len());
         for row in &activities {
             let a = &row.activity;
-            let found = match_row(&passes, row, only_uncategorized);
+            let found = match_row(&passes, row, only_uncategorized, replaces_manual);
             if let Some(payee_id) = found.payee_setter.and_then(|rule| rule.payee_to_set()) {
                 writes.push(NewActivityTaxonomyAssignment {
                     id: None,
@@ -462,7 +498,7 @@ impl CategorizationRulesService {
         Ok(activities
             .iter()
             .map(|row| {
-                let found = match_row(&passes, row, false);
+                let found = match_row(&passes, row, false, false);
                 let payee_rule = found.payee_setter.and_then(|rule| {
                     Some(AppliedRule {
                         rule: rule.clone(),
@@ -628,6 +664,7 @@ fn match_row<'r>(
     passes: &RulePasses<'_, 'r>,
     row: &crate::cash_activities::CashActivity,
     only_uncategorized: bool,
+    replaces_manual: bool,
 ) -> RowMatch<'r> {
     let a = &row.activity;
     // Rules read the text the bank sent, so editing the notes of an
@@ -644,7 +681,16 @@ fn match_row<'r>(
     };
     let payee_setter = passes.payee_setter(&input);
     let planned_payee = payee_setter.and_then(|rule| rule.payee_to_set());
-    input.payee_id = effective_payee(&row.assignments, planned_payee, only_uncategorized);
+    // A run allowed to replace hand-set values writes the planned payee over
+    // a manual one, so the category pass matches on it.
+    let has_manual_payee = row
+        .assignments
+        .iter()
+        .any(|a| a.taxonomy_id == PAYEES_TAXONOMY && a.source.eq_ignore_ascii_case("manual"));
+    input.payee_id = match planned_payee {
+        Some(planned) if replaces_manual && has_manual_payee => Some(planned),
+        _ => effective_payee(&row.assignments, planned_payee, only_uncategorized),
+    };
     let category = match_compiled_for_taxonomy(
         passes.category_rules(),
         row.cash_flow_bucket.taxonomy_id(),
@@ -1184,6 +1230,25 @@ mod tests {
                 rows.push(row);
             }
             Ok(rows)
+        }
+        async fn assign_rules_replacing_manual(
+            &self,
+            items: Vec<NewActivityTaxonomyAssignment>,
+            only_uncategorized: bool,
+            replace_manual_for: HashSet<String>,
+        ) -> Result<crate::activity_assignments::RuleAssignmentResult> {
+            // Mirrors the SQLite writer: on a listed activity a hand-set
+            // value a rule files differently gives way.
+            self.existing.lock().unwrap().retain(|a| {
+                !(a.source.eq_ignore_ascii_case("manual")
+                    && replace_manual_for.contains(&a.activity_id)
+                    && items.iter().any(|item| {
+                        item.activity_id == a.activity_id
+                            && item.taxonomy_id == a.taxonomy_id
+                            && item.category_id != a.category_id
+                    }))
+            });
+            self.assign_rules_detailed(items, only_uncategorized).await
         }
         async fn reassign_category(&self, _: &str, _: &str, _: &str) -> Result<usize> {
             unimplemented!()
@@ -3489,5 +3554,256 @@ mod tests {
             named(&explained.category_rule),
             Some(("both", "spending_categories", "cat_bakery"))
         );
+    }
+
+    // ----- scoped runs and the explicit manual override --------------------
+
+    fn scope(ids: &[&str], override_manual: bool) -> RuleRunScope {
+        RuleRunScope {
+            activity_ids: Some(ids.iter().map(|id| id.to_string()).collect()),
+            override_manual,
+        }
+    }
+
+    fn coffee_rules() -> Vec<CategorizationRule> {
+        vec![
+            mk_rule("payee", "COFFEE", PAYEES_TAXONOMY, "payee_cafe", 0),
+            mk_rule("category", "COFFEE", "spending_categories", "cat_food", 0),
+        ]
+    }
+
+    #[tokio::test]
+    async fn a_scoped_run_touches_only_the_listed_activities() {
+        let (svc, _, assignments) = mk_payee_svc(
+            coffee_rules(),
+            vec![
+                mk_activity("listed", "acct1", "COFFEE SHOP"),
+                mk_activity("unlisted", "acct1", "COFFEE SHOP"),
+            ],
+            vec![],
+        );
+
+        let summary = svc
+            .rerun_scoped(&["acct1".to_string()], false, &scope(&["listed"], false))
+            .await
+            .unwrap();
+
+        assert_eq!(summary.matched, 1);
+        assert_eq!(
+            applied(&assignments),
+            vec![
+                row("listed", PAYEES_TAXONOMY, "payee_cafe"),
+                row("listed", "spending_categories", "cat_food"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_scoped_run_stays_inside_the_given_accounts() {
+        let (svc, _, assignments) = mk_payee_svc(
+            coffee_rules(),
+            vec![mk_activity("elsewhere", "acct2", "COFFEE SHOP")],
+            vec![],
+        );
+
+        let summary = svc
+            .rerun_scoped(&["acct1".to_string()], false, &scope(&["elsewhere"], true))
+            .await
+            .unwrap();
+
+        assert_eq!(summary.matched, 0);
+        assert!(applied(&assignments).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_empty_activity_list_runs_on_nothing() {
+        let (svc, _, assignments) = mk_payee_svc(
+            coffee_rules(),
+            vec![mk_activity("act", "acct1", "COFFEE SHOP")],
+            vec![],
+        );
+
+        let summary = svc
+            .rerun_scoped(&["acct1".to_string()], false, &scope(&[], true))
+            .await
+            .unwrap();
+
+        assert_eq!(summary.matched, 0);
+        assert!(applied(&assignments).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_scoped_run_keeps_manual_values_without_the_override() {
+        let (svc, _, assignments) = mk_payee_svc(
+            coffee_rules(),
+            vec![mk_activity("act", "acct1", "COFFEE SHOP")],
+            vec![
+                mk_assignment("act", "spending_categories", "cat_gifts", "manual"),
+                mk_assignment("act", PAYEES_TAXONOMY, "payee_friend", "manual"),
+            ],
+        );
+
+        for only_uncategorized in [true, false] {
+            svc.rerun_scoped(
+                &["acct1".to_string()],
+                only_uncategorized,
+                &scope(&["act"], false),
+            )
+            .await
+            .unwrap();
+        }
+
+        assert!(applied(&assignments).is_empty());
+        let existing = assignments.existing.lock().unwrap();
+        assert!(existing.iter().all(|a| a.source == "manual"));
+        assert_eq!(existing.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn the_override_replaces_manual_values_only_on_listed_activities_a_rule_matches() {
+        let manual = |id: &str| {
+            vec![
+                mk_assignment(id, "spending_categories", "cat_gifts", "manual"),
+                mk_assignment(id, PAYEES_TAXONOMY, "payee_friend", "manual"),
+            ]
+        };
+        let (svc, _, assignments) = mk_payee_svc(
+            coffee_rules(),
+            vec![
+                mk_activity("listed", "acct1", "COFFEE SHOP"),
+                mk_activity("unlisted", "acct1", "COFFEE SHOP"),
+                // Listed, but no rule matches it: its manual values stay.
+                mk_activity("no-match", "acct1", "CITY WATER"),
+            ],
+            [manual("listed"), manual("unlisted"), manual("no-match")].concat(),
+        );
+
+        svc.rerun_scoped(
+            &["acct1".to_string()],
+            false,
+            &scope(&["listed", "no-match"], true),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            applied(&assignments),
+            vec![
+                row("listed", PAYEES_TAXONOMY, "payee_cafe"),
+                row("listed", "spending_categories", "cat_food"),
+            ]
+        );
+        let existing = assignments.existing.lock().unwrap();
+        for id in ["unlisted", "no-match"] {
+            let kept: Vec<_> = existing.iter().filter(|a| a.activity_id == id).collect();
+            assert_eq!(kept.len(), 2, "{id} keeps both manual values");
+            assert!(kept.iter().all(|a| a.source == "manual"));
+        }
+    }
+
+    #[tokio::test]
+    async fn the_override_is_refused_without_a_list_of_activities() {
+        let (svc, _, assignments) = mk_payee_svc(
+            coffee_rules(),
+            vec![mk_activity("act", "acct1", "COFFEE SHOP")],
+            vec![mk_assignment(
+                "act",
+                "spending_categories",
+                "cat_gifts",
+                "manual",
+            )],
+        );
+        let unscoped = RuleRunScope {
+            activity_ids: None,
+            override_manual: true,
+        };
+
+        for accounts in [vec!["acct1".to_string()], vec![]] {
+            let run = svc.rerun_scoped(&accounts, false, &unscoped).await;
+            let preview = svc.preview_scoped(&accounts, false, &unscoped).await;
+            for refused in [run, preview] {
+                let error = refused.expect_err("an unscoped override must be refused");
+                assert!(matches!(
+                    error.downcast_ref::<SpendingError>(),
+                    Some(SpendingError::InvalidInput { .. })
+                ));
+            }
+        }
+        assert!(applied(&assignments).is_empty());
+        assert_eq!(assignments.existing.lock().unwrap()[0].source, "manual");
+    }
+
+    #[tokio::test]
+    async fn the_unscoped_entry_points_never_replace_manual_values() {
+        let (svc, _, assignments) = mk_payee_svc(
+            coffee_rules(),
+            vec![mk_activity("act", "acct1", "COFFEE SHOP")],
+            vec![
+                mk_assignment("act", "spending_categories", "cat_gifts", "manual"),
+                mk_assignment("act", PAYEES_TAXONOMY, "payee_friend", "manual"),
+            ],
+        );
+
+        svc.rerun_all(&["acct1".to_string()], false).await.unwrap();
+        svc.rerun_detailed(&["acct1".to_string()], false)
+            .await
+            .unwrap();
+        crate::categorization_rules::CategorizationRulesServiceTrait::rerun_detailed(
+            &svc,
+            &["acct1".to_string()],
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert!(applied(&assignments).is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_overridden_manual_payee_gives_way_to_the_planned_one_for_category_rules() {
+        let (svc, _, assignments) = mk_payee_svc(
+            vec![
+                mk_rule("payee", "NETFLIX", PAYEES_TAXONOMY, "payee_netflix", 0),
+                mk_payee_condition_rule("amazon", "payee_amazon", "cat_shopping", 0),
+                mk_payee_condition_rule("netflix", "payee_netflix", "cat_streaming", 0),
+            ],
+            vec![mk_activity("act", "acct1", "NETFLIX.COM")],
+            vec![mk_assignment(
+                "act",
+                PAYEES_TAXONOMY,
+                "payee_amazon",
+                "manual",
+            )],
+        );
+
+        svc.rerun_scoped(&["acct1".to_string()], false, &scope(&["act"], true))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            applied(&assignments),
+            vec![
+                row("act", PAYEES_TAXONOMY, "payee_netflix"),
+                row("act", "spending_categories", "cat_streaming"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_scope_defaults_to_an_unscoped_protected_run() {
+        let scope: RuleRunScope = serde_json::from_value(serde_json::json!({})).unwrap();
+        assert_eq!(scope, RuleRunScope::default());
+        assert!(scope.manual_overrides().unwrap().is_empty());
+
+        // The flag alone names no activities, listed or not.
+        let listed: RuleRunScope =
+            serde_json::from_value(serde_json::json!({ "activityIds": ["a", "b"] })).unwrap();
+        assert!(listed.manual_overrides().unwrap().is_empty());
+
+        let overriding: RuleRunScope = serde_json::from_value(
+            serde_json::json!({ "activityIds": ["a", "b"], "overrideManual": true }),
+        )
+        .unwrap();
+        assert_eq!(overriding.manual_overrides().unwrap().len(), 2);
     }
 }
