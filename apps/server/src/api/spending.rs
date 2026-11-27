@@ -447,12 +447,6 @@ async fn explain_activity_rules(
     axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(body): Json<ExplainRulesBody>,
 ) -> ApiResult<Json<Vec<ActivityRuleExplanation>>> {
-    // The same batch a bulk assignment may hold: it is asked about one.
-    if body.activity_ids.len() > MAX_BULK_CATEGORY_ASSIGNMENTS {
-        return Err(ApiError::BadRequest(format!(
-            "At most {MAX_BULK_CATEGORY_ASSIGNMENTS} activities can be explained at once"
-        )));
-    }
     Ok(Json(
         state
             .categorization_rules_service
@@ -1049,6 +1043,7 @@ mod tests {
             RuleRunScope {
                 activity_ids: Some(vec!["a1".to_string(), "a2".to_string()]),
                 override_manual: true,
+                rule_ids: None,
             }
         );
 

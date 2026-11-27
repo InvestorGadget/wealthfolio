@@ -429,12 +429,14 @@ pub async fn rerun_categorization_rules_detailed(
     only_uncategorized: bool,
     activity_ids: Option<Vec<String>>,
     override_manual: Option<bool>,
+    rule_ids: Option<Vec<String>>,
     state: ProfileAccess,
 ) -> Result<CategorizationRunSummary, String> {
     let context = state.context()?;
     let scope = RuleRunScope {
         activity_ids,
         override_manual: override_manual.unwrap_or(false),
+        rule_ids,
     };
     let settings = context
         .spending_settings_service()
@@ -453,17 +455,21 @@ pub async fn rerun_categorization_rules_detailed(
 }
 
 /// What `rerun_categorization_rules_detailed` would do, without writing.
+/// With `rule_ids`, what those rules alone would: the summary's activity
+/// counts then say how many transactions they fill and how many they leave.
 #[tauri::command]
 pub async fn preview_categorization_rules_rerun(
     only_uncategorized: bool,
     activity_ids: Option<Vec<String>>,
     override_manual: Option<bool>,
+    rule_ids: Option<Vec<String>>,
     state: ProfileAccess,
 ) -> Result<CategorizationRunSummary, String> {
     let context = state.context()?;
     let scope = RuleRunScope {
         activity_ids,
         override_manual: override_manual.unwrap_or(false),
+        rule_ids,
     };
     let settings = context
         .spending_settings_service()
@@ -487,12 +493,6 @@ pub async fn explain_activity_rules(
     activity_ids: Vec<String>,
     state: ProfileAccess,
 ) -> Result<Vec<ActivityRuleExplanation>, String> {
-    // The same batch a bulk assignment may hold: it is asked about one.
-    if activity_ids.len() > MAX_BULK_CATEGORY_ASSIGNMENTS {
-        return Err(format!(
-            "At most {MAX_BULK_CATEGORY_ASSIGNMENTS} activities can be explained at once"
-        ));
-    }
     state
         .context()?
         .categorization_rules_service()

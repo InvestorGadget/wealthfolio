@@ -237,6 +237,12 @@ pub struct RuleRunScope {
     /// a whole-account run never replaces manual values.
     #[serde(default)]
     pub override_manual: bool,
+    /// Keep only what these rules contribute to the run. Every rule still
+    /// competes for each activity; an assignment is kept when one of these
+    /// rules wins it. `None` keeps them all. It is how "what would this rule
+    /// fill?" is asked: the counts are then that rule's alone.
+    #[serde(default)]
+    pub rule_ids: Option<Vec<String>>,
 }
 
 impl RuleRunScope {

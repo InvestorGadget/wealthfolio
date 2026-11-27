@@ -1595,12 +1595,13 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "preview_categorization_rules_rerun": {
       // Without a scope the body is what it always was; `undefined` keys are
       // dropped by JSON.stringify.
-      const { onlyUncategorized, activityIds, overrideManual } = payload as {
+      const { onlyUncategorized, activityIds, overrideManual, ruleIds } = payload as {
         onlyUncategorized: boolean;
         activityIds?: string[];
         overrideManual?: boolean;
+        ruleIds?: string[];
       };
-      body = JSON.stringify({ onlyUncategorized, activityIds, overrideManual });
+      body = JSON.stringify({ onlyUncategorized, activityIds, overrideManual, ruleIds });
       break;
     }
     case "explain_activity_rules": {

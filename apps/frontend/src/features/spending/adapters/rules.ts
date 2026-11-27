@@ -2,7 +2,6 @@ import { invoke, logger } from "#platform";
 import type {
   ActivityRuleExplanation,
   CategorizationRule,
-  CategorizationRunSummary,
   ImportPresetResult,
   NewCategorizationRule,
   RemovePresetResult,

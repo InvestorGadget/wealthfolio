@@ -292,6 +292,13 @@ describe("adapter command parity", () => {
       const unscoped = stubFetch(summary);
       await invoke(command, { onlyUncategorized: true });
       expect(lastCall(unscoped).body).toBe(JSON.stringify({ onlyUncategorized: true }));
+
+      // Narrowed to what one rule contributes, as the rule suggestion asks.
+      const oneRule = stubFetch(summary);
+      await invoke(command, { onlyUncategorized: true, ruleIds: ["r1"] });
+      expect(lastCall(oneRule).body).toBe(
+        JSON.stringify({ onlyUncategorized: true, ruleIds: ["r1"] }),
+      );
     }
   });
 

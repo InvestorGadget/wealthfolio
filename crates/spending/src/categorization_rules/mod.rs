@@ -16,7 +16,7 @@ pub use model::{
     UpdateCategorizationRule, NO_TEXT_CONDITION_PATTERN,
 };
 pub use presets::{ImportPresetResult, RemovePresetResult, RulePreset, RulePresetSummary};
-pub use service::CategorizationRulesService;
+pub use service::{CategorizationRulesService, MAX_EXPLAINED_ACTIVITIES};
 pub use traits::{
     CategorizationRulesRepositoryTrait, CategorizationRulesServiceTrait, PresetImportCounts,
 };

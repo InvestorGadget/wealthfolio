@@ -24,6 +24,10 @@ use crate::activity_assignments::{
 };
 use crate::error::SpendingError;
 
+/// The most activities one explanation covers: the batch a bulk assignment
+/// may hold, since an explanation is asked about one.
+pub const MAX_EXPLAINED_ACTIVITIES: usize = 1_000;
+
 pub struct CategorizationRulesService {
     repo: Arc<dyn CategorizationRulesRepositoryTrait>,
     cash_service: Arc<dyn CashActivityServiceTrait>,
@@ -406,6 +410,16 @@ impl CategorizationRulesService {
             activities.retain(|row| ids.contains(row.activity.id.as_str()));
         }
         let replaces_manual = scope.override_manual;
+        // With `scope.rule_ids`, only what those rules win is planned.
+        let only_rules: Option<HashSet<&str>> = scope
+            .rule_ids
+            .as_ref()
+            .map(|ids| ids.iter().map(String::as_str).collect());
+        let in_scope = |rule: &&CategorizationRule| {
+            only_rules
+                .as_ref()
+                .is_none_or(|ids| ids.contains(rule.id.as_str()))
+        };
 
         let rules = self.repo.list().await?;
         let known_payees = if RulePasses::needs_known_payees(&rules) {
@@ -423,7 +437,8 @@ impl CategorizationRulesService {
         for row in &activities {
             let a = &row.activity;
             let found = match_row(&passes, row, only_uncategorized, replaces_manual);
-            if let Some(payee_id) = found.payee_setter.and_then(|rule| rule.payee_to_set()) {
+            let payee_setter = found.payee_setter.filter(in_scope);
+            if let Some(payee_id) = payee_setter.and_then(|rule| rule.payee_to_set()) {
                 writes.push(NewActivityTaxonomyAssignment {
                     id: None,
                     activity_id: a.id.clone(),
@@ -433,8 +448,12 @@ impl CategorizationRulesService {
                     source: "rule".to_string(),
                 });
             }
-            let Some(rule) = found.category else {
-                if found.matches_another_taxonomy {
+            let Some(rule) = found.category.filter(in_scope) else {
+                // A mismatch is reported for the run as a whole, not for some rules.
+                if found.category.is_none()
+                    && found.matches_another_taxonomy
+                    && only_rules.is_none()
+                {
                     matched_count += 1;
                     // A mismatch only explains rows it leaves uncategorized; once
                     // the row has a category in its own taxonomy, it is settled.
@@ -448,7 +467,7 @@ impl CategorizationRulesService {
                     if !categorized {
                         incompatible += 1;
                     }
-                } else if found.payee_setter.is_some() {
+                } else if payee_setter.is_some() {
                     matched_count += 1;
                 }
                 continue;
@@ -477,15 +496,35 @@ impl CategorizationRulesService {
     /// gives it its payee and the rule that gives it its category, matched as
     /// [`Self::plan_rerun`] matches them. Read-only: it says what the rules
     /// say, not what a run would write over a category or payee the user set.
-    /// Activities outside the Spending scope are left out.
+    /// Activities outside the Spending scope are left out, and an id named
+    /// twice is explained once.
+    ///
+    /// The Spending scope is classified as a whole (a transfer is neutral only
+    /// beside its other leg), so this reads every tracked account's activities
+    /// to explain a few of them, as [`Self::plan_rerun`] does for a run.
     pub async fn explain_activities(
         &self,
         activity_ids: &[String],
     ) -> Result<Vec<ActivityRuleExplanation>> {
+        // Each activity once, however often it was named.
+        let mut seen = HashSet::new();
+        let activity_ids: Vec<String> = activity_ids
+            .iter()
+            .filter(|id| seen.insert(id.as_str()))
+            .cloned()
+            .collect();
         if activity_ids.is_empty() {
             return Ok(Vec::new());
         }
-        let activities = self.cash_service.get_by_activity_ids(activity_ids).await?;
+        if activity_ids.len() > MAX_EXPLAINED_ACTIVITIES {
+            return Err(SpendingError::InvalidInput {
+                message: format!(
+                    "At most {MAX_EXPLAINED_ACTIVITIES} activities can be explained at once"
+                ),
+            }
+            .into());
+        }
+        let activities = self.cash_service.get_by_activity_ids(&activity_ids).await?;
         let rules = self.repo.list().await?;
         let known_payees = if RulePasses::needs_known_payees(&rules) {
             Some(self.cash_service.payee_ids().await?)
@@ -3562,6 +3601,7 @@ mod tests {
         RuleRunScope {
             activity_ids: Some(ids.iter().map(|id| id.to_string()).collect()),
             override_manual,
+            rule_ids: None,
         }
     }
 
@@ -3716,6 +3756,7 @@ mod tests {
         let unscoped = RuleRunScope {
             activity_ids: None,
             override_manual: true,
+            rule_ids: None,
         };
 
         for accounts in [vec!["acct1".to_string()], vec![]] {
@@ -3805,5 +3846,117 @@ mod tests {
         )
         .unwrap();
         assert_eq!(overriding.manual_overrides().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn explain_takes_each_activity_once_and_refuses_too_many() {
+        let (svc, _, _) = mk_svc(
+            vec![mk_rule(
+                "r",
+                "TESCO",
+                "spending_categories",
+                "cat_groceries",
+                0,
+            )],
+            vec![mk_activity("a", "acct1", "TESCO")],
+        );
+        let explained = svc
+            .explain_activities(&["a".to_string(), "a".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(explained.len(), 1);
+
+        let many: Vec<String> = (0..=MAX_EXPLAINED_ACTIVITIES)
+            .map(|n| format!("activity-{n}"))
+            .collect();
+        let refused = svc.explain_activities(&many).await.unwrap_err();
+        assert!(matches!(
+            refused.downcast_ref::<SpendingError>(),
+            Some(SpendingError::InvalidInput { .. })
+        ));
+        // The same id a thousand and one times is still one activity.
+        let repeated = vec!["a".to_string(); MAX_EXPLAINED_ACTIVITIES + 1];
+        assert_eq!(svc.explain_activities(&repeated).await.unwrap().len(), 1);
+    }
+
+    /// "Apply to N matching uncategorized transactions?" asks about the rule
+    /// just saved. A run narrowed to it plans what that rule wins and nothing
+    /// of any other rule's, so the writer's counts are that rule's alone.
+    #[tokio::test]
+    async fn a_run_narrowed_to_a_rule_plans_only_what_that_rule_wins() {
+        let mut both = mk_rule("both", "BAKERY", "spending_categories", "cat_bakery", 5);
+        both.set_payee_id = Some("payee_bakery".to_string());
+        let rules = vec![
+            both,
+            mk_rule("other", "WATER", "spending_categories", "cat_utilities", 0),
+            // Loses to `both` wherever both match.
+            mk_rule("weaker", "BAKERY", "spending_categories", "cat_other", 1),
+        ];
+        let activities = || {
+            vec![
+                mk_activity("open", "acct1", "CORNER BAKERY"),
+                mk_activity("by-hand", "acct1", "CORNER BAKERY 2"),
+                mk_activity("water", "acct1", "CITY WATER"),
+                mk_activity("water-by-hand", "acct1", "CITY WATER 2"),
+            ]
+        };
+        let by_hand = || {
+            vec![
+                mk_assignment("by-hand", "spending_categories", "cat_cafe", "manual"),
+                mk_assignment("by-hand", PAYEES_TAXONOMY, "payee_amazon", "manual"),
+                mk_assignment("water-by-hand", "spending_categories", "cat_cafe", "manual"),
+            ]
+        };
+        let only = |rule_id: &str| RuleRunScope {
+            rule_ids: Some(vec![rule_id.to_string()]),
+            ..Default::default()
+        };
+        let accounts = ["acct1".to_string()];
+
+        // The rule's two activities, and no other rule's: neither what
+        // `other` would fill nor what the user filed by hand under its match.
+        let (svc, _, assignments) = mk_payee_svc(rules.clone(), activities(), by_hand());
+        let summary = svc
+            .rerun_scoped(&accounts, true, &only("both"))
+            .await
+            .unwrap();
+        assert_eq!(summary.matched, 2);
+        // One activity filled, with its payee and its category.
+        assert_eq!(
+            applied(&assignments),
+            vec![
+                row("open", PAYEES_TAXONOMY, "payee_bakery"),
+                row("open", "spending_categories", "cat_bakery"),
+            ]
+        );
+
+        let (svc, _, assignments) = mk_payee_svc(rules.clone(), activities(), by_hand());
+        let summary = svc
+            .rerun_scoped(&accounts, true, &only("other"))
+            .await
+            .unwrap();
+        assert_eq!(summary.matched, 2);
+        assert_eq!(
+            applied(&assignments),
+            vec![row("water", "spending_categories", "cat_utilities")]
+        );
+
+        // A rule that never wins plans nothing, and an unknown one neither.
+        for rule_id in ["weaker", "missing"] {
+            let (svc, _, assignments) = mk_payee_svc(rules.clone(), activities(), by_hand());
+            let summary = svc
+                .rerun_scoped(&accounts, true, &only(rule_id))
+                .await
+                .unwrap();
+            assert_eq!(summary.matched, 0);
+            assert!(applied(&assignments).is_empty());
+        }
+
+        // Unnarrowed, the same run plans every rule's.
+        let (svc, _, assignments) = mk_payee_svc(rules, activities(), by_hand());
+        svc.rerun_scoped(&accounts, true, &RuleRunScope::default())
+            .await
+            .unwrap();
+        assert_eq!(applied(&assignments).len(), 3);
     }
 }
