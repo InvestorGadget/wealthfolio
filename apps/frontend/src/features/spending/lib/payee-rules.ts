@@ -1,4 +1,4 @@
-import type { CategorizationRule, RuleMatchType } from "../types/rule";
+import type { CategorizationRule, RuleDraft } from "../types/rule";
 import { PAYEES_TAXONOMY_ID } from "./payee";
 import { getBankText } from "./bank-text";
 import {
@@ -46,16 +46,6 @@ export const RULES_PAYEE_PARAM = "payee";
 /** The rules page showing only the rules that name the payee. */
 export const rulesForPayeePath = (payeeId: string): string =>
   `${RULES_PAGE_PATH}?${RULES_PAYEE_PARAM}=${encodeURIComponent(payeeId)}`;
-
-/** What a new rule's form starts from, when something else proposes the rule. */
-export interface RuleDraft {
-  name?: string;
-  pattern?: string;
-  matchType?: RuleMatchType;
-  taxonomyId?: string;
-  categoryId?: string;
-  payeeConditionId?: string;
-}
 
 /** Router state that opens the rules page on a new rule started from `ruleDraft`. */
 export interface RulesPageState {

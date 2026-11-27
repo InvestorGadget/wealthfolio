@@ -91,6 +91,21 @@ export interface NewCategorizationRule {
   presetVersion?: string | null;
 }
 
+/**
+ * What a new rule's form starts from, when something else proposes the rule:
+ * a payee's page, a payee merge, a rule suggestion or a transaction's menu.
+ * What it leaves out starts empty. Nothing is saved from it.
+ */
+export interface RuleDraft {
+  name?: string;
+  pattern?: string;
+  matchType?: RuleMatchType;
+  taxonomyId?: string | null;
+  categoryId?: string | null;
+  payeeConditionId?: string | null;
+  setPayeeId?: string | null;
+}
+
 export interface UpdateCategorizationRule {
   name?: string;
   pattern?: string;

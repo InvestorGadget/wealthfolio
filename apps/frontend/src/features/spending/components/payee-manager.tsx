@@ -38,6 +38,7 @@ import { getPayeeReferences, getPayeeUsage } from "../adapters/cash-activities";
 import { listCategorizationRules } from "../adapters/rules";
 import { useCategorizationRules } from "../hooks/use-categorization-rules";
 import { ensurePayee, findPayee, PAYEES_TAXONOMY_ID } from "../lib/payee";
+import type { RuleDraft } from "../types/rule";
 import { mergePayee } from "../lib/payee-merge";
 import {
   countRulesByPayee,
@@ -47,7 +48,6 @@ import {
   RULES_PAGE_PATH,
   rulesForPayeePath,
   type BankTextSummary,
-  type RuleDraft,
   type RulesPageState,
 } from "../lib/payee-rules";
 

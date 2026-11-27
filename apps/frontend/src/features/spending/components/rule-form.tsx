@@ -28,7 +28,6 @@ import {
 } from "@wealthfolio/ui";
 
 import { findPayee, PAYEES_TAXONOMY_ID } from "../lib/payee";
-import type { RuleDraft } from "../lib/payee-rules";
 import {
   isAnyOfMode,
   MAX_REGEX_PATTERN_LENGTH,
@@ -36,11 +35,11 @@ import {
   textConditionDraft,
   type TextConditionMode,
 } from "../lib/rule-conditions";
-import type { RulePrefill } from "../lib/rule-suggestion";
 import type {
   CategorizationRule,
   NewCategorizationRule,
   RuleAmountOp,
+  RuleDraft,
   RuleMatchType,
 } from "../types/rule";
 import { CategoryIconTile } from "./category-chips";
@@ -257,8 +256,6 @@ interface RuleFormProps {
   rule?: CategorizationRule;
   /** What a new rule's form starts from. Ignored when editing `rule`. */
   draft?: RuleDraft;
-  /** What a new rule's form opens with. Ignored when `rule` is being edited. */
-  prefill?: RulePrefill;
   /** Flat list of what a rule can set: spending, income and savings categories, and payees. */
   categoryOptions: RuleFormCategoryOption[];
   /** Tracked spending accounts the rule can be scoped to. */
@@ -352,7 +349,6 @@ function RulePayeePicker({
 export function RuleForm({
   rule,
   draft,
-  prefill,
   categoryOptions,
   accountOptions,
   onSubmit,
@@ -421,27 +417,28 @@ export function RuleForm({
   // The stored text condition as the form edits it: a payee-only rule shows
   // an empty text, never its placeholder, and a compiled list shows the list.
   // A new rule can open filled in; the user still reviews and saves it.
-  const seed = rule ?? prefill;
-  const initialText = useMemo(() => {
-    if (seed) return textConditionDraft(seed);
-    return textConditionDraft(
-      draft?.pattern !== undefined
-        ? { pattern: draft.pattern, matchType: draft.matchType ?? "contains" }
-        : undefined,
-    );
-  }, [seed, draft]);
+  const seed = rule ?? draft;
+  const initialText = useMemo(
+    () =>
+      textConditionDraft(
+        seed?.pattern !== undefined
+          ? { pattern: seed.pattern, matchType: seed.matchType ?? "contains" }
+          : undefined,
+      ),
+    [seed],
+  );
 
   const form = useForm<RuleFormState>({
     resolver: zodResolver(ruleFormSchema) as never,
     defaultValues: {
-      name: seed?.name ?? draft?.name ?? "",
+      name: seed?.name ?? "",
       pattern: initialText.pattern,
       patternList: initialText.list,
       matchType: initialText.mode,
-      payeeConditionId: seed?.payeeConditionId ?? draft?.payeeConditionId ?? null,
+      payeeConditionId: seed?.payeeConditionId ?? null,
       setPayeeId: seed?.setPayeeId ?? null,
-      taxonomyId: seed?.taxonomyId ?? draft?.taxonomyId ?? "",
-      categoryId: composite(seed ?? draft), // we encode taxonomyId:categoryId in this single field
+      taxonomyId: seed?.taxonomyId ?? "",
+      categoryId: composite(seed), // we encode taxonomyId:categoryId in this single field
       activityType: rule?.activityType ?? "",
       amountOp: rule?.amountOp ?? "",
       amountValue: rule?.amountValue != null ? String(rule.amountValue) : "",

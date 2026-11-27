@@ -10,9 +10,8 @@ import {
   type RuleFormState,
   type RuleFormValues,
 } from "./rule-form";
-import { mergeRuleDraft, payeeConditionDraft, type RuleDraft } from "../lib/payee-rules";
-import type { RulePrefill } from "../lib/rule-suggestion";
-import type { CategorizationRule } from "../types/rule";
+import { mergeRuleDraft, payeeConditionDraft } from "../lib/payee-rules";
+import type { CategorizationRule, RuleDraft } from "../types/rule";
 
 vi.mock("@/hooks/use-taxonomies", () => {
   const categories = {
@@ -386,19 +385,6 @@ describe("rule form started from a draft or a suggestion", () => {
     );
     return onSubmit;
   };
-  const renderPrefilled = (prefill: RulePrefill) => {
-    const onSubmit = vi.fn<(values: RuleFormValues) => void>();
-    render(
-      <RuleForm
-        prefill={prefill}
-        categoryOptions={options}
-        accountOptions={[]}
-        onSubmit={onSubmit}
-        onCancel={vi.fn()}
-      />,
-    );
-    return onSubmit;
-  };
 
   it("starts a payee's rule on its payee condition, with the target left to pick", async () => {
     const user = userEvent.setup();
@@ -439,7 +425,7 @@ describe("rule form started from a draft or a suggestion", () => {
     });
   });
 
-  const create = async (onSubmit: ReturnType<typeof renderPrefilled>) => {
+  const create = async (onSubmit: ReturnType<typeof renderDraft>) => {
     const user = userEvent.setup();
     // A new rule, not an edit: nothing exists until this is pressed.
     await user.click(screen.getByRole("button", { name: "Create rule" }));
@@ -448,7 +434,7 @@ describe("rule form started from a draft or a suggestion", () => {
   };
 
   it("opens on a payee condition and the category, with the existing defaults", async () => {
-    const onSubmit = renderPrefilled({
+    const onSubmit = renderDraft({
       name: "Corner Bakery",
       pattern: "",
       matchType: "contains",
@@ -476,7 +462,7 @@ describe("rule form started from a draft or a suggestion", () => {
   });
 
   it("opens on the exact bank text, which also sets the payee", async () => {
-    const onSubmit = renderPrefilled({
+    const onSubmit = renderDraft({
       name: "Corner Bakery",
       pattern: "CORNER BAKERY 0042",
       matchType: "exact",
@@ -497,7 +483,7 @@ describe("rule form started from a draft or a suggestion", () => {
   });
 
   it("opens on a payee as the target of a payee-only rule", async () => {
-    const onSubmit = renderPrefilled({
+    const onSubmit = renderDraft({
       name: "Corner Bakery",
       pattern: "CORNER BAKERY 0042",
       matchType: "exact",

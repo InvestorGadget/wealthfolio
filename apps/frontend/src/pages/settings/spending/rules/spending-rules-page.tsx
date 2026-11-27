@@ -40,12 +40,14 @@ import {
 } from "@/features/spending/components/rule-item";
 import { PRESET_FLAGS } from "@/features/spending/components/rule-preset-constants";
 import { RulePresetPicker } from "@/features/spending/components/rule-preset-picker";
-import { ruleAmountPayload, type RuleFormValues } from "@/features/spending/components/rule-form";
+import {
+  newRuleFromFormValues,
+  type RuleFormValues,
+} from "@/features/spending/components/rule-form";
 import { PAYEES_TAXONOMY_ID } from "@/features/spending/lib/payee";
 import {
   ruleNamesPayee,
   RULES_PAYEE_PARAM,
-  type RuleDraft,
   type RulesPageState,
 } from "@/features/spending/lib/payee-rules";
 import { hasTextCondition, parseAnyOfPattern } from "@/features/spending/lib/rule-conditions";
@@ -56,7 +58,7 @@ import {
 } from "@/features/spending/hooks/use-categorization-rules";
 import { useRuleFormOptions } from "@/features/spending/hooks/use-rule-form-options";
 import { useSpendingSettings } from "@/features/spending/hooks/use-spending-settings";
-import type { CategorizationRule } from "@/features/spending/types/rule";
+import type { CategorizationRule, RuleDraft } from "@/features/spending/types/rule";
 
 import { SettingsHeader } from "../../settings-header";
 import { SpendingBackLink } from "../components/spending-back-link";
@@ -204,48 +206,15 @@ export default function SpendingRulesPage() {
   };
 
   const handleSave = async (values: RuleFormValues) => {
-    const { amountOp, amountValue, amountValue2 } = ruleAmountPayload(values);
+    // Every field is sent explicitly, on an update too: null clears a payee,
+    // an amount condition or the account, and the backend rejects an
+    // isGlobal/accountId pair that disagrees.
+    const rule = newRuleFromFormValues(values);
     try {
       if (selectedRule) {
-        await update.mutateAsync({
-          id: selectedRule.id,
-          patch: {
-            name: values.name,
-            pattern: values.pattern,
-            matchType: values.matchType,
-            taxonomyId: values.taxonomyId || null,
-            categoryId: values.categoryId || null,
-            activityType: values.activityType || null,
-            amountOp,
-            amountValue,
-            amountValue2,
-            // Always sent explicitly too: null clears the payee.
-            payeeConditionId: values.payeeConditionId,
-            setPayeeId: values.setPayeeId,
-            priority: values.priority,
-            // Always sent explicitly: null clears the column, an id sets it, and
-            // the backend rejects an isGlobal/accountId pair that disagrees.
-            isGlobal: values.accountId === null,
-            accountId: values.accountId,
-          },
-        });
+        await update.mutateAsync({ id: selectedRule.id, patch: rule });
       } else {
-        await create.mutateAsync({
-          name: values.name,
-          pattern: values.pattern,
-          matchType: values.matchType,
-          taxonomyId: values.taxonomyId || null,
-          categoryId: values.categoryId || null,
-          activityType: values.activityType || null,
-          amountOp,
-          amountValue,
-          amountValue2,
-          payeeConditionId: values.payeeConditionId,
-          setPayeeId: values.setPayeeId,
-          priority: values.priority,
-          isGlobal: values.accountId === null,
-          accountId: values.accountId,
-        });
+        await create.mutateAsync(rule);
       }
       closeModal();
     } catch {

@@ -1,4 +1,4 @@
-import type { ActivityRuleExplanation, AppliedRule, RuleMatchType } from "../types/rule";
+import type { ActivityRuleExplanation, AppliedRule, RuleDraft, RuleMatchType } from "../types/rule";
 import { PAYEES_TAXONOMY_ID } from "./payee";
 import { MAX_REGEX_PATTERN_LENGTH } from "./rule-conditions";
 
@@ -9,20 +9,6 @@ export interface ManualEdit {
   /** They set a payee: the one the transactions are now filed under. */
   payeeChanged?: boolean;
 }
-
-/** What the rule form opens with when a rule is suggested. Nothing is saved from it. */
-export interface RulePrefill {
-  name: string;
-  pattern: string;
-  matchType: RuleMatchType;
-  taxonomyId: string | null;
-  categoryId: string | null;
-  payeeConditionId: string | null;
-  setPayeeId: string | null;
-}
-
-/** A rule to write, before it has a name. */
-export type RuleDraft = Omit<RulePrefill, "name">;
 
 export type RuleSuggestion =
   | {

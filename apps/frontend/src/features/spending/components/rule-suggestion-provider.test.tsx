@@ -10,11 +10,11 @@ import {
   RULE_SUGGESTION_SNOOZE_MS,
   updateRuleSuggestionPreferences,
 } from "../lib/rule-suggestion-preferences";
-import type { RulePrefill } from "../lib/rule-suggestion";
 import type {
   ActivityRuleExplanation,
   CategorizationRule,
   CategorizationRunSummary,
+  RuleDraft,
 } from "../types/rule";
 import type { RuleFormValues } from "./rule-form";
 import {
@@ -99,18 +99,18 @@ const savedValues: RuleFormValues = {
 vi.mock("./rule-edit-modal", () => ({
   RuleEditModal: ({
     rule,
-    prefill,
+    draft,
     onSave,
     onClose,
   }: {
     rule?: CategorizationRule;
-    prefill?: RulePrefill;
+    draft?: RuleDraft;
     onSave: (values: RuleFormValues) => void;
     onClose: () => void;
   }) => (
     <div role="dialog" aria-label="Rule form">
       <output data-testid="editing">{rule?.id ?? ""}</output>
-      <output data-testid="prefill">{JSON.stringify(prefill ?? null)}</output>
+      <output data-testid="draft">{JSON.stringify(draft ?? null)}</output>
       <button type="button" onClick={() => onSave(savedValues)}>
         Save rule
       </button>
@@ -231,7 +231,7 @@ describe("RuleSuggestionProvider", () => {
 
     await user.click(view.getByRole("button", { name: "Create rule" }));
     expect(mocks.dismissed).toEqual(["spending-rule-suggestion"]);
-    expect(JSON.parse(screen.getByTestId("prefill").textContent ?? "")).toEqual({
+    expect(JSON.parse(screen.getByTestId("draft").textContent ?? "")).toEqual({
       name: "Tesco",
       pattern: "",
       matchType: "contains",
@@ -261,7 +261,7 @@ describe("RuleSuggestionProvider", () => {
     // No payee is involved, so there is none to silence.
     expect(view.queryByRole("button", { name: /Don't suggest for/ })).not.toBeInTheDocument();
     await user.click(view.getByRole("button", { name: "Create rule" }));
-    expect(JSON.parse(screen.getByTestId("prefill").textContent ?? "")).toMatchObject({
+    expect(JSON.parse(screen.getByTestId("draft").textContent ?? "")).toMatchObject({
       name: "TESCO STORES 3301",
       pattern: "TESCO STORES 3301",
       matchType: "exact",
@@ -512,7 +512,7 @@ describe("RuleSuggestionProvider", () => {
       await screen.findByRole("dialog", { name: "Rule form" });
       expect(mocks.explain).toHaveBeenCalledWith(["a1"]);
       expect(mocks.shown).toBeNull();
-      expect(JSON.parse(screen.getByTestId("prefill").textContent ?? "")).toEqual({
+      expect(JSON.parse(screen.getByTestId("draft").textContent ?? "")).toEqual({
         name: "Tesco",
         pattern: "",
         matchType: "contains",
@@ -530,7 +530,7 @@ describe("RuleSuggestionProvider", () => {
       act(() => api.createRuleFor("a1", null));
 
       await screen.findByRole("dialog", { name: "Rule form" });
-      expect(JSON.parse(screen.getByTestId("prefill").textContent ?? "")).toMatchObject({
+      expect(JSON.parse(screen.getByTestId("draft").textContent ?? "")).toMatchObject({
         name: "TESCO STORES 3301",
         pattern: "TESCO STORES 3301",
         matchType: "exact",

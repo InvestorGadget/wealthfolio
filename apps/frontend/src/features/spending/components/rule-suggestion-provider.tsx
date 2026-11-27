@@ -28,8 +28,6 @@ import {
   ruleDraftForActivity,
   suggestedRuleName,
   type ManualEdit,
-  type RuleDraft,
-  type RulePrefill,
   type RuleSuggestion,
 } from "../lib/rule-suggestion";
 import {
@@ -39,7 +37,7 @@ import {
   ruleSuggestionsActive,
   snoozeRuleSuggestions,
 } from "../lib/rule-suggestion-preferences";
-import type { CategorizationRule, CategorizationRunSummary } from "../types/rule";
+import type { CategorizationRule, CategorizationRunSummary, RuleDraft } from "../types/rule";
 import { RuleApplyDialog } from "./rule-apply-dialog";
 import { RuleEditModal } from "./rule-edit-modal";
 import { newRuleFromFormValues, type RuleFormValues } from "./rule-form";
@@ -76,7 +74,7 @@ interface RuleFormRequest {
   /** Remounts the form for each request. */
   key: number;
   rule?: CategorizationRule;
-  prefill?: RulePrefill;
+  draft?: RuleDraft;
 }
 
 /** The name of a category or payee, read through the cache the pickers share. */
@@ -120,7 +118,7 @@ export function RuleSuggestionProvider({ children }: { children: ReactNode }) {
 
   /** A draft with the name the form opens with. */
   const named = useCallback(
-    async (draft: RuleDraft, bankText: string | null): Promise<RulePrefill> => {
+    async (draft: RuleDraft, bankText: string | null): Promise<RuleDraft> => {
       const payeeId =
         draft.payeeConditionId ??
         draft.setPayeeId ??
@@ -148,7 +146,7 @@ export function RuleSuggestionProvider({ children }: { children: ReactNode }) {
         onAction = () => openForm({ rule: applied.rule });
       } else {
         const { draft, bankText } = suggestion;
-        const prefill = await named(draft, bankText);
+        const namedDraft = await named(draft, bankText);
         const target = await categoryName(qc, t, draft.taxonomyId, draft.categoryId);
         title = t("spending:ruleSuggestion.title");
         description = draft.payeeConditionId
@@ -161,7 +159,7 @@ export function RuleSuggestionProvider({ children }: { children: ReactNode }) {
               })
             : t("spending:ruleSuggestion.descText", { target, text: quoted(bankText) });
         actionLabel = t("spending:ruleSuggestion.createRule");
-        onAction = () => openForm({ prefill });
+        onAction = () => openForm({ draft: namedDraft });
       }
       // Asked again here: the names above took a moment to load.
       if (!isLatest()) return;
@@ -240,7 +238,7 @@ export function RuleSuggestionProvider({ children }: { children: ReactNode }) {
             return;
           }
           const draft = ruleDraftForActivity(explained, category);
-          openForm({ prefill: await named(draft, explained.bankText ?? null) });
+          openForm({ draft: await named(draft, explained.bankText ?? null) });
         } catch {
           toast.error(t("spending:ruleSuggestion.unavailable"));
         }
@@ -322,7 +320,7 @@ function SuggestedRuleForm({
       open
       onClose={onClose}
       rule={request.rule}
-      prefill={request.prefill}
+      draft={request.draft}
       categoryOptions={categoryOptions}
       accountOptions={accountOptions}
       onSave={handleSave}
