@@ -114,6 +114,19 @@ export default function SpendingRulesPage() {
   );
   const [visibleModal, setVisibleModal] = useState(ruleDraft !== undefined);
   const [selectedRule, setSelectedRule] = useState<CategorizationRule | undefined>();
+  // A screen that stays mounted (the mobile stack keeps screens in a hidden
+  // `<Activity>`) can be handed a new location: a draft that arrives with one
+  // opens the form as on the first render.
+  const [draftLocationKey, setDraftLocationKey] = useState(location.key);
+  if (draftLocationKey !== location.key) {
+    setDraftLocationKey(location.key);
+    const incoming = (location.state as RulesPageState | null)?.ruleDraft;
+    if (incoming) {
+      setRuleDraft(incoming);
+      setSelectedRule(undefined);
+      setVisibleModal(true);
+    }
+  }
   const closeModal = () => {
     setVisibleModal(false);
     if ((location.state as RulesPageState | null)?.ruleDraft) {

@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider, useMutation } from "@tanstack/react-query";
 import { Activity } from "react";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { MemoryRouter, useLocation, useNavigate } from "react-router-dom";
 import { afterEach, expect, it, vi } from "vitest";
 import type { RuleFormValues } from "@/features/spending/components/rule-form";
 import SpendingRulesPage from "./spending-rules-page";
@@ -89,8 +89,10 @@ afterEach(() => {
 
 /** Where the router is, and the state it carries. */
 let location: ReturnType<typeof useLocation>;
+let navigate: ReturnType<typeof useNavigate>;
 function LocationProbe() {
   location = useLocation();
+  navigate = useNavigate();
   return null;
 }
 const renderAt = (entry: string | { pathname: string; state: object }) =>
@@ -229,4 +231,22 @@ it("waits for the payees, and says so when they fail to load", () => {
   } finally {
     delete mocks.taxonomies.payees;
   }
+});
+
+it("opens a draft handed to a screen that is already mounted", async () => {
+  // The mobile stack keeps screens mounted, so a screen can be given a new
+  // location instead of being rendered afresh.
+  renderAt("/settings/spending/rules");
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+  const ruleDraft = { name: "City Water", payeeConditionId: "p2" };
+  await act(() => navigate("/settings/spending/rules", { state: { ruleDraft } }));
+
+  expect(screen.getByRole("dialog")).toBeInTheDocument();
+  expect(mocks.modalDraft).toHaveBeenLastCalledWith(ruleDraft);
+
+  // A later location without a draft leaves the screen as it is.
+  fireEvent.click(screen.getByRole("button", { name: "Close rule" }));
+  await act(() => navigate("/settings/spending/rules?payee=p2"));
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 });

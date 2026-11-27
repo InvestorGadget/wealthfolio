@@ -28,6 +28,8 @@ interface RunRulesDialogProps {
   /** The transactions to run the rules on. */
   activityIds: string[];
   onClose: () => void;
+  /** Called once the rules have run, before the dialog closes. */
+  onRan?: () => void;
 }
 
 /**
@@ -35,20 +37,24 @@ interface RunRulesDialogProps {
  *
  * It first shows what the run would change and how many hand-set categories
  * and payees it would keep. Those are kept unless the user ticks the override
- * and confirms it. The run replaces what earlier rules, imports and the
+ * and confirms it; with the box ticked the numbers are those of the run that
+ * replaces them. The run replaces what earlier rules, imports and the
  * assistant set, as "Recategorize all" does, on these transactions only.
  */
-export function RunRulesDialog({ activityIds, onClose }: RunRulesDialogProps) {
+export function RunRulesDialog({ activityIds, onClose, onRan }: RunRulesDialogProps) {
   const { t } = useTranslation();
   const qc = useQueryClient();
-  const preview = useQuery({
-    queryKey: ["spending-rules-run-preview", activityIds],
-    queryFn: () => previewCategorizationRulesRerun(false, { activityIds }),
+  const previewOf = (overrideManual: boolean) => ({
+    queryKey: ["spending-rules-run-preview", activityIds, overrideManual],
+    queryFn: () => previewCategorizationRulesRerun(false, { activityIds, overrideManual }),
     staleTime: 0,
     gcTime: 0,
     retry: false,
     refetchOnWindowFocus: false,
   });
+  // The protected run is always previewed: its kept count is what the
+  // override offers to replace.
+  const protectedPreview = useQuery(previewOf(false));
   const run = useMutation({
     mutationFn: (overrideManual: boolean) =>
       rerunCategorizationRulesDetailed(false, { activityIds, overrideManual }),
@@ -75,15 +81,22 @@ export function RunRulesDialog({ activityIds, onClose }: RunRulesDialogProps) {
       toast.success(t("spending:rules.runSelected.done", { count: summary.changedActivities }), {
         description: details.length > 0 ? details.join(" ") : undefined,
       });
+      onRan?.();
       onClose();
     },
     onError: () => toast.error(t("spending:rules.runSelected.error")),
   });
   const override = useRuleRunOverride((overrideManual) => run.mutate(overrideManual));
 
+  const overridePreview = useQuery({ ...previewOf(true), enabled: override.checked });
+  // What is shown and run is the preview of the run the box asks for.
+  const preview = override.checked ? overridePreview : protectedPreview;
+
+  const replaceable = protectedPreview.data?.keptManualActivities ?? 0;
   const changes = preview.data?.changedActivities ?? 0;
   const keptManual = preview.data?.keptManualActivities ?? 0;
-  const canRun = !!preview.data && !run.isPending && (changes > 0 || override.checked);
+  const replaced = preview.data?.replacedManualActivities ?? 0;
+  const canRun = !!preview.data && !run.isPending && changes > 0;
 
   return (
     <>
@@ -92,26 +105,32 @@ export function RunRulesDialog({ activityIds, onClose }: RunRulesDialogProps) {
           <DialogHeader>
             <DialogTitle>{t("spending:rules.runSelected.title")}</DialogTitle>
             <DialogDescription>
-              {preview.isLoading
-                ? t("spending:rules.runSelected.loading")
-                : preview.isError
-                  ? t("spending:rules.runSelected.previewError")
-                  : changes === 0 && keptManual === 0
-                    ? t("spending:rules.runSelected.nothing")
-                    : [
-                        t("spending:rules.runSelected.willChange", { count: changes }),
-                        keptManual > 0
-                          ? t("spending:rules.runSelected.keptManual", { count: keptManual })
-                          : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
+              {/* Announced when it arrives, and again when the box changes it. */}
+              <span role="status" aria-live="polite">
+                {preview.isLoading
+                  ? t("spending:rules.runSelected.loading")
+                  : preview.isError
+                    ? t("spending:rules.runSelected.previewError")
+                    : changes === 0 && keptManual === 0
+                      ? t("spending:rules.runSelected.nothing")
+                      : [
+                          t("spending:rules.runSelected.willChange", { count: changes }),
+                          replaced > 0
+                            ? t("spending:rules.runSelected.replacesManual", { count: replaced })
+                            : "",
+                          keptManual > 0
+                            ? t("spending:rules.runSelected.keptManual", { count: keptManual })
+                            : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+              </span>
             </DialogDescription>
           </DialogHeader>
-          {keptManual > 0 && (
+          {replaceable > 0 && (
             <RuleRunOverrideCheckbox
               override={override}
-              count={keptManual}
+              count={replaceable}
               disabled={run.isPending}
             />
           )}
@@ -126,7 +145,7 @@ export function RunRulesDialog({ activityIds, onClose }: RunRulesDialogProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <RuleRunOverrideConfirm override={override} count={keptManual} />
+      <RuleRunOverrideConfirm override={override} count={replaced} />
     </>
   );
 }

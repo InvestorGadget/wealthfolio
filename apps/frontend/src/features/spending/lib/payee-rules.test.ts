@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import type { CategorizationRule } from "../types/rule";
 import {
-  bankText,
   countRulesByPayee,
   MAX_MERGE_RULE_TEXTS,
   mergeRuleDraft,
@@ -74,16 +73,6 @@ it("links to the rules page narrowed to a payee", () => {
   expect(rulesForPayeePath("p 1&x")).toBe("/settings/spending/rules?payee=p%201%26x");
 });
 
-describe("bankText", () => {
-  it("is the imported description, else the notes, as rules read them", () => {
-    expect(bankText({ importedDescription: "TESCO 3301", notes: "Weekly shop" })).toBe(
-      "TESCO 3301",
-    );
-    expect(bankText({ importedDescription: "   ", notes: "TESCO EXPRESS" })).toBe("TESCO EXPRESS");
-    expect(bankText({ importedDescription: null, notes: "  " })).toBeUndefined();
-  });
-});
-
 describe("summarizeBankTexts", () => {
   it("lists the distinct texts, ignoring case, most frequent first", () => {
     const summary = summarizeBankTexts([
@@ -128,14 +117,15 @@ describe("summarizeBankTexts", () => {
     expect(new TextEncoder().encode(pattern).length).toBeLessThanOrEqual(MAX_REGEX_PATTERN_LENGTH);
   });
 
-  it("counts but does not list a text the list form cannot hold whole", () => {
+  it("leaves out a text the list form cannot hold whole, from the list and the count", () => {
     const summary = summarizeBankTexts([
       { notes: " PADDED" },
       { notes: "TWO\nLINES" },
       { notes: "PLAIN" },
     ]);
 
-    expect(summary).toEqual({ texts: ["PLAIN"], distinct: 3 });
+    // The count is what "the K most frequent of N" is said of.
+    expect(summary).toEqual({ texts: ["PLAIN"], distinct: 1 });
   });
 });
 
@@ -143,50 +133,63 @@ describe("payeeRuleCoversTexts", () => {
   const texts = ["CORNER BAKERY 0042", "SQ *BAKERY"];
   const list = (items: string[], mode: "exact" | "contains" = "exact") =>
     payeeRule("p1", { matchType: "regex", pattern: compileAnyOfPattern({ mode, items }) });
+  const covers = (rules: CategorizationRule[], payeeId = "p1") =>
+    payeeRuleCoversTexts(rules, payeeId, texts);
 
-  it("holds when the payee's rules list every text as a whole text", () => {
+  it("holds when a list rule for the payee has every text", () => {
+    expect(covers([list(["corner bakery 0042", "SQ *BAKERY", "MORE"])])).toBe(true);
+    expect(covers([list(["bakery"], "contains")])).toBe(true);
+  });
+
+  it("weighs single-text rules as the matcher does, ignoring case", () => {
+    expect(covers([payeeRule("p1", { matchType: "contains", pattern: "bakery" })])).toBe(true);
     expect(
-      payeeRuleCoversTexts([list(["corner bakery 0042", "SQ *BAKERY", "MORE"])], "p1", texts),
+      covers([
+        payeeRule("p1", { matchType: "starts_with", pattern: "corner" }),
+        payeeRule("p1", { matchType: "exact", pattern: "sq *bakery" }),
+      ]),
     ).toBe(true);
-    expect(
-      payeeRuleCoversTexts(
-        [
-          list(["CORNER BAKERY 0042"]),
-          payeeRule("p1", { matchType: "exact", pattern: "sq *bakery" }),
-        ],
-        "p1",
-        texts,
-      ),
-    ).toBe(true);
+    // Only the start, and only the whole text.
+    expect(covers([payeeRule("p1", { matchType: "starts_with", pattern: "BAKERY" })])).toBe(false);
+    expect(covers([payeeRule("p1", { matchType: "exact", pattern: "BAKERY" })])).toBe(false);
+  });
+
+  it("compares an exact pattern as stored, spaces included", () => {
+    const one = ["SQ *BAKERY"];
+    const exact = (pattern: string) => [payeeRule("p1", { matchType: "exact", pattern })];
+
+    expect(payeeRuleCoversTexts(exact("SQ *BAKERY"), "p1", one)).toBe(true);
+    expect(payeeRuleCoversTexts(exact("SQ *BAKERY "), "p1", one)).toBe(false);
+  });
+
+  it("counts a category rule that also sets the payee", () => {
+    expect(covers([rule({ matchType: "contains", pattern: "BAKERY", setPayeeId: "p1" })])).toBe(
+      true,
+    );
+    expect(covers([rule({ matchType: "contains", pattern: "BAKERY", setPayeeId: "p2" })])).toBe(
+      false,
+    );
   });
 
   it("does not hold when a text is missing, or the rule is for something else", () => {
-    expect(payeeRuleCoversTexts([list(["CORNER BAKERY 0042"])], "p1", texts)).toBe(false);
-    expect(payeeRuleCoversTexts([list(texts)], "p2", texts)).toBe(false);
-    expect(
-      payeeRuleCoversTexts(
-        [
-          rule({
-            matchType: "regex",
-            pattern: compileAnyOfPattern({ mode: "exact", items: texts }),
-          }),
-        ],
-        "p1",
-        texts,
-      ),
-    ).toBe(false);
-    expect(payeeRuleCoversTexts([], "p1", texts)).toBe(false);
+    expect(covers([list(["CORNER BAKERY 0042"])])).toBe(false);
+    expect(covers([list(texts)], "p2")).toBe(false);
+    // A category rule that sets no payee.
+    expect(covers([rule({ matchType: "contains", pattern: "BAKERY" })])).toBe(false);
+    expect(covers([])).toBe(false);
   });
 
-  it("does not count a rule that is narrowed, or matches another way", () => {
+  it("does not count a rule that is narrowed, has no text, or is another regex", () => {
     for (const narrowed of [
       { isGlobal: false, accountId: "acct" },
       { activityType: "WITHDRAWAL" },
       { amountOp: "gt" as const, amountValue: 5 },
     ]) {
-      expect(payeeRuleCoversTexts([{ ...list(texts), ...narrowed }], "p1", texts)).toBe(false);
+      expect(covers([{ ...list(texts), ...narrowed }])).toBe(false);
     }
-    expect(payeeRuleCoversTexts([list(texts, "contains")], "p1", texts)).toBe(false);
+    expect(covers([payeeRule("p1", { matchType: "regex", pattern: "(?!)" })])).toBe(false);
+    // A hand-written regex is not evaluated.
+    expect(covers([payeeRule("p1", { matchType: "regex", pattern: "BAKERY" })])).toBe(false);
   });
 });
 

@@ -103,12 +103,10 @@ describe("list", () => {
     ]);
     const user = setup();
 
-    const bakeryRules = screen.getByRole("link", { name: "Rules for Corner Bakery: 2" });
+    const bakeryRules = screen.getByRole("link", { name: "2 rules for Corner Bakery" });
     expect(bakeryRules).toHaveTextContent("2 rules");
-    expect(screen.getByRole("link", { name: "Rules for City Water: 1" })).toHaveTextContent(
-      "1 rule",
-    );
-    expect(screen.queryByRole("button", { name: /^Create a rule for/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "1 rule for City Water" })).toHaveTextContent("1 rule");
+    expect(screen.queryByRole("button", { name: /^Create rule for/ })).not.toBeInTheDocument();
 
     await user.click(bakeryRules);
     expect(location.pathname + location.search).toBe("/settings/spending/rules?payee=p-bakery");
@@ -117,7 +115,7 @@ describe("list", () => {
   it("offers to create a rule for a payee no rule names, started on that payee", async () => {
     const user = setup();
 
-    await user.click(screen.getByRole("button", { name: "Create a rule for City Water" }));
+    await user.click(screen.getByRole("button", { name: "Create rule for City Water" }));
 
     expect(location.pathname).toBe("/settings/spending/rules");
     expect(location.state).toEqual({
@@ -130,7 +128,7 @@ describe("list", () => {
     setup();
 
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /^Create a rule for/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Create rule for/ })).not.toBeInTheDocument();
   });
 
   it("offers to add a payee even when there are none", async () => {
@@ -283,6 +281,23 @@ describe("rule offered after a merge", () => {
     await vi.waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
     expect(mocks.merge).toHaveBeenCalledWith("p-water", "p-bakery");
     expect(mocks.listRules).not.toHaveBeenCalled();
+  });
+
+  it("stays busy until the offer is decided, so the merge cannot be confirmed twice", async () => {
+    mocks.merge.mockResolvedValue({ texts, distinct: 2 });
+    let finish: (rules: object[]) => void = () => undefined;
+    mocks.listRules.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+    const user = setup();
+
+    await mergeWater(user);
+
+    await vi.waitFor(() => expect(mocks.listRules).toHaveBeenCalled());
+    expect(screen.getByRole("button", { name: "Merge and delete" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(mocks.merge).toHaveBeenCalledTimes(1);
+
+    finish([]);
+    expect(await screen.findByRole("alertdialog", { name: offerTitle })).toBeInTheDocument();
   });
 
   it("is skipped when a rule for the destination already lists every text", async () => {

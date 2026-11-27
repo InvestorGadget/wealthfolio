@@ -1566,7 +1566,11 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
           ))}
 
         {runRulesOn && (
-          <RunRulesDialog activityIds={runRulesOn} onClose={() => setRunRulesOn(undefined)} />
+          <RunRulesDialog
+            activityIds={runRulesOn}
+            onClose={() => setRunRulesOn(undefined)}
+            onRan={clearSelection}
+          />
         )}
 
         <DeleteTransactionsDialog

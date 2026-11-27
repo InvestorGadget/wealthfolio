@@ -309,7 +309,9 @@ function DeletePayeeDialog({ payee, others, onClose, onCreateRule }: DeletePayee
     },
   });
   const [offer, setOffer] = useState<MergeRuleOffer>();
-  const pending = remove.isPending || merge.isPending;
+  // Whether the merge is done and the rule offer is still being decided.
+  const [deciding, setDeciding] = useState(false);
+  const pending = remove.isPending || merge.isPending || deciding;
   const used = !!usage.data && (usage.data.transactions > 0 || usage.data.rules > 0);
   const destination = others.find((other) => other.id === destinationId);
 
@@ -327,9 +329,15 @@ function DeletePayeeDialog({ payee, others, onClose, onCreateRule }: DeletePayee
         // New transactions with the merged payee's bank texts would still
         // arrive without a payee. Offer a rule for them, unless there is
         // nothing to list or a rule for the destination lists them already.
-        if (bankTexts.texts.length > 0 && !(await coveredByRule(destination.id, bankTexts))) {
-          setOffer({ destination, bankTexts });
-          return;
+        if (bankTexts.texts.length > 0) {
+          // Busy until the offer is decided: the merge must not be confirmed twice.
+          setDeciding(true);
+          const covered = await coveredByRule(destination.id, bankTexts);
+          setDeciding(false);
+          if (!covered) {
+            setOffer({ destination, bankTexts });
+            return;
+          }
         }
       } else {
         await remove.mutateAsync({ taxonomyId: PAYEES_TAXONOMY_ID, categoryId: payee.id });
