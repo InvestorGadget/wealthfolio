@@ -253,6 +253,7 @@ export const COMMANDS: CommandMap = {
   delete_categorization_rule: { method: "DELETE", path: "/spending/rules" },
   rerun_categorization_rules: { method: "POST", path: "/spending/rules/rerun" },
   rerun_categorization_rules_detailed: { method: "POST", path: "/spending/rules/rerun/detailed" },
+  preview_categorization_rules_rerun: { method: "POST", path: "/spending/rules/rerun/preview" },
   list_rule_presets: { method: "GET", path: "/spending/rule-presets" },
   import_rule_preset: { method: "POST", path: "/spending/rule-presets" },
   remove_rule_preset: { method: "DELETE", path: "/spending/rule-presets" },
@@ -1575,10 +1576,21 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       url += `/${encodeURIComponent(id)}`;
       break;
     }
-    case "rerun_categorization_rules":
-    case "rerun_categorization_rules_detailed": {
+    case "rerun_categorization_rules": {
       const { onlyUncategorized } = payload as { onlyUncategorized: boolean };
       body = JSON.stringify({ onlyUncategorized });
+      break;
+    }
+    case "rerun_categorization_rules_detailed":
+    case "preview_categorization_rules_rerun": {
+      // Without a scope the body is what it always was; `undefined` keys are
+      // dropped by JSON.stringify.
+      const { onlyUncategorized, activityIds, overrideManual } = payload as {
+        onlyUncategorized: boolean;
+        activityIds?: string[];
+        overrideManual?: boolean;
+      };
+      body = JSON.stringify({ onlyUncategorized, activityIds, overrideManual });
       break;
     }
     case "import_rule_preset": {

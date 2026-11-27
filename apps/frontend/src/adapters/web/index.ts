@@ -273,6 +273,7 @@ export {
   getSpendCategories,
   isSpendingEnabled,
   listCategorizationRules,
+  previewCategorizationRulesRerun,
   rerunCategorizationRules,
   rerunCategorizationRulesDetailed,
   SPEND_CATEGORY_KIND_TO_TAXONOMY_ID,

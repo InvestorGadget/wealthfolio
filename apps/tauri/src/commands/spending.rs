@@ -20,7 +20,7 @@ use wealthfolio_spending::cash_activities::{
 };
 use wealthfolio_spending::categorization_rules::{
     CategorizationRule, CategorizationRunSummary, ImportPresetResult, NewCategorizationRule,
-    RemovePresetResult, RulePresetSummary, UpdateCategorizationRule,
+    RemovePresetResult, RulePresetSummary, RuleRunScope, UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
@@ -411,25 +411,64 @@ pub async fn rerun_categorization_rules(
         .map_err(|e| format!("Failed to re-run rules: {}", e))
 }
 
+/// `activity_ids` narrows the run to those activities. `override_manual`
+/// lets a matching rule replace categories and payees set by hand on them;
+/// the service refuses it without `activity_ids`.
 #[tauri::command]
 pub async fn rerun_categorization_rules_detailed(
     only_uncategorized: bool,
+    activity_ids: Option<Vec<String>>,
+    override_manual: Option<bool>,
     state: ProfileAccess,
 ) -> Result<CategorizationRunSummary, String> {
     let context = state.context()?;
+    let scope = RuleRunScope {
+        activity_ids,
+        override_manual: override_manual.unwrap_or(false),
+    };
     let settings = context
         .spending_settings_service()
         .get()
         .await
         .map_err(|e| format!("Failed to load spending settings: {}", e))?;
     if !settings.enabled {
+        scope.manual_overrides().map_err(|e| e.to_string())?;
         return Ok(CategorizationRunSummary::default());
     }
     context
         .categorization_rules_service()
-        .rerun_detailed(&settings.account_ids, only_uncategorized)
+        .rerun_scoped(&settings.account_ids, only_uncategorized, &scope)
         .await
         .map_err(|e| format!("Failed to re-run rules: {}", e))
+}
+
+/// What `rerun_categorization_rules_detailed` would do, without writing.
+#[tauri::command]
+pub async fn preview_categorization_rules_rerun(
+    only_uncategorized: bool,
+    activity_ids: Option<Vec<String>>,
+    override_manual: Option<bool>,
+    state: ProfileAccess,
+) -> Result<CategorizationRunSummary, String> {
+    let context = state.context()?;
+    let scope = RuleRunScope {
+        activity_ids,
+        override_manual: override_manual.unwrap_or(false),
+    };
+    let settings = context
+        .spending_settings_service()
+        .get()
+        .await
+        .map_err(|e| format!("Failed to load spending settings: {}", e))?;
+    if !settings.enabled {
+        scope.manual_overrides().map_err(|e| e.to_string())?;
+        return Ok(CategorizationRunSummary::default());
+    }
+    context
+        .categorization_rules_service()
+        .preview_scoped(&settings.account_ids, only_uncategorized, &scope)
+        .await
+        .map_err(|e| format!("Failed to preview rules: {}", e))
 }
 
 #[tauri::command]
