@@ -22,25 +22,18 @@ interface RuleApplyDialogProps {
   isApplying?: boolean;
   onApply: () => void;
   onClose: () => void;
-  /**
-   * More to choose before applying, below the counts. The dialog itself only
-   * ever fills in what has no category: anything that widens the run (such as
-   * overwriting what was categorized by hand) is the caller's to add here and
-   * to act on in `onApply`.
-   */
-  children?: React.ReactNode;
 }
 
 /**
  * "Apply to N matching uncategorized transactions?", asked once a suggested
- * rule is saved. Declining leaves the rule for the next import or rerun.
+ * rule is saved. It only ever fills in what has no category. Declining leaves
+ * the rule for the next import or rerun.
  */
 export function RuleApplyDialog({
   preview,
   isApplying = false,
   onApply,
   onClose,
-  children,
 }: RuleApplyDialogProps) {
   const { t } = useTranslation();
   // Counted in transactions: a rule that sets a payee and a category fills one
@@ -59,7 +52,6 @@ export function RuleApplyDialog({
               : t("spending:ruleSuggestion.applyKeepsManual")}
           </AlertDialogDescription>
         </AlertDialogHeader>
-        {children}
         <AlertDialogFooter>
           <AlertDialogCancel>{t("spending:ruleSuggestion.applyLater")}</AlertDialogCancel>
           <AlertDialogAction onClick={onApply} disabled={isApplying}>
