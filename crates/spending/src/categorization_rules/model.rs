@@ -365,3 +365,30 @@ pub struct CategorizationRunSummary {
     #[serde(flatten)]
     pub decisions: crate::activity_assignments::RuleAssignmentResult,
 }
+
+/// A rule that applies to an activity, and what it sets there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppliedRule {
+    pub rule: CategorizationRule,
+    pub taxonomy_id: String,
+    pub category_id: String,
+}
+
+/// What a full rule run makes of one activity, whatever is on file for it:
+/// the rule that gives it its payee and the rule that gives it its category.
+/// Nothing is written; a category or payee the user set stays theirs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityRuleExplanation {
+    pub activity_id: String,
+    /// The text rules match (`Activity::bank_text`).
+    pub bank_text: Option<String>,
+    /// The payee the activity is filed under now.
+    pub payee_id: Option<String>,
+    /// The rule a run takes the activity's payee from.
+    pub payee_rule: Option<AppliedRule>,
+    /// The rule a run takes the activity's category from, matched against the
+    /// payee the run leaves on the activity.
+    pub category_rule: Option<AppliedRule>,
+}

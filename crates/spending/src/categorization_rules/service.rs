@@ -12,8 +12,9 @@ use super::matcher::{
     match_compiled_for_taxonomy, RuleInput, RulePasses, MAX_REGEX_PATTERN_LEN,
 };
 use super::model::{
-    is_text_condition, CategorizationRule, NewCategorizationRule, RuleAmountOp, RuleMatchType,
-    UpdateCategorizationRule, NO_TEXT_CONDITION_PATTERN,
+    is_text_condition, ActivityRuleExplanation, AppliedRule, CategorizationRule,
+    NewCategorizationRule, RuleAmountOp, RuleMatchType, UpdateCategorizationRule,
+    NO_TEXT_CONDITION_PATTERN,
 };
 use super::presets::{self, ImportPresetResult, RemovePresetResult, RulePresetSummary};
 use super::traits::CategorizationRulesRepositoryTrait;
@@ -361,13 +362,8 @@ impl CategorizationRulesService {
         Ok(())
     }
 
-    /// Match every activity against the rules, in two passes.
-    ///
-    /// The payee pass comes first: payee rules, and category rules that also
-    /// set a payee, give the activity its payee. The category pass then sees
-    /// the payee the activity ends up with (see [`effective_payee`]): the one
-    /// just planned, unless the writer will keep a payee the activity already
-    /// has. That is how one run chains "text → payee" into "payee → category".
+    /// Match every activity against the rules (see [`match_row`]) and plan
+    /// the assignments the run writes.
     async fn plan_rerun(
         &self,
         account_ids: &[String],
@@ -390,21 +386,8 @@ impl CategorizationRulesService {
         let mut writes: Vec<NewActivityTaxonomyAssignment> = Vec::with_capacity(activities.len());
         for row in &activities {
             let a = &row.activity;
-            // Rules read the text the bank sent, so editing the notes of an
-            // imported activity does not change what matches it.
-            let notes_raw = a.bank_text().unwrap_or("");
-            let notes_upper = notes_raw.to_uppercase();
-            let mut input = RuleInput {
-                notes_upper: &notes_upper,
-                notes_raw,
-                activity_type: a.effective_type(),
-                account_id: &a.account_id,
-                amount: a.amount.map(|d| d.abs()),
-                payee_id: None,
-            };
-            let planned_payee = passes.planned_payee(&input);
-            let has_payee = planned_payee.is_some();
-            if let Some(payee_id) = planned_payee {
+            let found = match_row(&passes, row, only_uncategorized);
+            if let Some(payee_id) = found.payee_setter.and_then(|rule| rule.payee_to_set()) {
                 writes.push(NewActivityTaxonomyAssignment {
                     id: None,
                     activity_id: a.id.clone(),
@@ -414,13 +397,8 @@ impl CategorizationRulesService {
                     source: "rule".to_string(),
                 });
             }
-            input.payee_id = effective_payee(&row.assignments, planned_payee, only_uncategorized);
-            let Some(m) = match_compiled_for_taxonomy(
-                passes.category_rules(),
-                row.cash_flow_bucket.taxonomy_id(),
-                &input,
-            ) else {
-                if match_compiled(passes.category_rules(), &input).is_some() {
+            let Some(rule) = found.category else {
+                if found.matches_another_taxonomy {
                     matched_count += 1;
                     // A mismatch only explains rows it leaves uncategorized; once
                     // the row has a category in its own taxonomy, it is settled.
@@ -434,14 +412,14 @@ impl CategorizationRulesService {
                     if !categorized {
                         incompatible += 1;
                     }
-                } else if has_payee {
+                } else if found.payee_setter.is_some() {
                     matched_count += 1;
                 }
                 continue;
             };
             matched_count += 1;
             if let (Some(tax_id), Some(cat_id)) =
-                (m.rule.taxonomy_id.clone(), m.rule.category_id.clone())
+                (rule.taxonomy_id.clone(), rule.category_id.clone())
             {
                 writes.push(NewActivityTaxonomyAssignment {
                     id: None,
@@ -457,6 +435,57 @@ impl CategorizationRulesService {
         }
 
         Ok((matched_count, writes, incompatible, without_target))
+    }
+
+    /// What a full rule run makes of each of these activities: the rule that
+    /// gives it its payee and the rule that gives it its category, matched as
+    /// [`Self::plan_rerun`] matches them. Read-only: it says what the rules
+    /// say, not what a run would write over a category or payee the user set.
+    /// Activities outside the Spending scope are left out.
+    pub async fn explain_activities(
+        &self,
+        activity_ids: &[String],
+    ) -> Result<Vec<ActivityRuleExplanation>> {
+        if activity_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let activities = self.cash_service.get_by_activity_ids(activity_ids).await?;
+        let rules = self.repo.list().await?;
+        let known_payees = if RulePasses::needs_known_payees(&rules) {
+            Some(self.cash_service.payee_ids().await?)
+        } else {
+            None
+        };
+        let all_compiled = compile_rules(&rules);
+        let passes = RulePasses::new(&all_compiled, known_payees.as_ref());
+
+        Ok(activities
+            .iter()
+            .map(|row| {
+                let found = match_row(&passes, row, false);
+                let payee_rule = found.payee_setter.and_then(|rule| {
+                    Some(AppliedRule {
+                        rule: rule.clone(),
+                        taxonomy_id: PAYEES_TAXONOMY.to_string(),
+                        category_id: rule.payee_to_set()?.to_string(),
+                    })
+                });
+                let category_rule = found.category.and_then(|rule| {
+                    Some(AppliedRule {
+                        rule: rule.clone(),
+                        taxonomy_id: rule.taxonomy_id.clone()?,
+                        category_id: rule.category_id.clone()?,
+                    })
+                });
+                ActivityRuleExplanation {
+                    activity_id: row.activity.id.clone(),
+                    bank_text: row.activity.bank_text().map(str::to_string),
+                    payee_id: effective_payee(&row.assignments, None, false).map(str::to_string),
+                    payee_rule,
+                    category_rule,
+                }
+            })
+            .collect())
     }
 
     /// List the bundled presets, marking which ones the user already has installed
@@ -575,6 +604,59 @@ impl CategorizationRulesService {
             removed,
             kept_modified,
         })
+    }
+}
+
+/// The rules that apply to one activity.
+struct RowMatch<'r> {
+    /// The rule the run takes the activity's payee from.
+    payee_setter: Option<&'r CategorizationRule>,
+    /// The best category rule the activity's own taxonomy can take.
+    category: Option<&'r CategorizationRule>,
+    /// No such rule, but a category rule of another taxonomy matches.
+    matches_another_taxonomy: bool,
+}
+
+/// Match one activity, in two passes.
+///
+/// The payee pass comes first: payee rules, and category rules that also set
+/// a payee, give the activity its payee. The category pass then sees the payee
+/// the activity ends up with (see [`effective_payee`]): the one just planned,
+/// unless the writer will keep a payee the activity already has. That is how
+/// one run chains "text → payee" into "payee → category".
+fn match_row<'r>(
+    passes: &RulePasses<'_, 'r>,
+    row: &crate::cash_activities::CashActivity,
+    only_uncategorized: bool,
+) -> RowMatch<'r> {
+    let a = &row.activity;
+    // Rules read the text the bank sent, so editing the notes of an
+    // imported activity does not change what matches it.
+    let notes_raw = a.bank_text().unwrap_or("");
+    let notes_upper = notes_raw.to_uppercase();
+    let mut input = RuleInput {
+        notes_upper: &notes_upper,
+        notes_raw,
+        activity_type: a.effective_type(),
+        account_id: &a.account_id,
+        amount: a.amount.map(|d| d.abs()),
+        payee_id: None,
+    };
+    let payee_setter = passes.payee_setter(&input);
+    let planned_payee = payee_setter.and_then(|rule| rule.payee_to_set());
+    input.payee_id = effective_payee(&row.assignments, planned_payee, only_uncategorized);
+    let category = match_compiled_for_taxonomy(
+        passes.category_rules(),
+        row.cash_flow_bucket.taxonomy_id(),
+        &input,
+    )
+    .map(|m| m.rule);
+    let matches_another_taxonomy =
+        category.is_none() && match_compiled(passes.category_rules(), &input).is_some();
+    RowMatch {
+        payee_setter,
+        category,
+        matches_another_taxonomy,
     }
 }
 
@@ -1176,9 +1258,16 @@ mod tests {
         }
         async fn get_by_activity_ids(
             &self,
-            _: &[String],
+            activity_ids: &[String],
         ) -> Result<Vec<crate::cash_activities::CashActivity>> {
-            unimplemented!()
+            let accounts: Vec<String> = self
+                .activities
+                .iter()
+                .map(|a| a.account_id.clone())
+                .collect();
+            let mut rows = self.list_for_rules(&accounts).await?;
+            rows.retain(|row| activity_ids.contains(&row.activity.id));
+            Ok(rows)
         }
         async fn bulk_assign_categories(
             &self,
@@ -3212,6 +3301,193 @@ mod tests {
         assert_eq!(
             written,
             vec!["blank-description", "manual", "notes-mention"]
+        );
+    }
+
+    /// `(rule id, taxonomy, category)` of the rule an explanation names.
+    fn named(rule: &Option<AppliedRule>) -> Option<(&str, &str, &str)> {
+        rule.as_ref().map(|applied| {
+            (
+                applied.rule.id.as_str(),
+                applied.taxonomy_id.as_str(),
+                applied.category_id.as_str(),
+            )
+        })
+    }
+
+    async fn explain_one(svc: &CategorizationRulesService, id: &str) -> ActivityRuleExplanation {
+        let mut explained = svc
+            .explain_activities(&[id.to_string()])
+            .await
+            .expect("explain");
+        assert_eq!(explained.len(), 1);
+        explained.remove(0)
+    }
+
+    #[tokio::test]
+    async fn explain_names_the_payee_rule_and_the_category_rule_it_feeds() {
+        let (svc, _, assignments) = mk_payee_svc(
+            vec![
+                mk_rule("payee", "AMZN", PAYEES_TAXONOMY, "payee_amazon", 0),
+                mk_payee_condition_rule("category", "payee_amazon", "cat_shopping", 0),
+            ],
+            vec![
+                mk_activity("amazon", "acct1", "AMZN MKTP 123"),
+                mk_activity("other", "acct1", "CITY WATER"),
+            ],
+            vec![],
+        );
+
+        let amazon = explain_one(&svc, "amazon").await;
+        assert_eq!(amazon.bank_text.as_deref(), Some("AMZN MKTP 123"));
+        assert_eq!(amazon.payee_id, None);
+        assert_eq!(
+            named(&amazon.payee_rule),
+            Some(("payee", PAYEES_TAXONOMY, "payee_amazon"))
+        );
+        assert_eq!(
+            named(&amazon.category_rule),
+            Some(("category", "spending_categories", "cat_shopping"))
+        );
+
+        let other = explain_one(&svc, "other").await;
+        assert_eq!(other.payee_rule, None);
+        assert_eq!(other.category_rule, None);
+
+        // Unknown ids are left out, and nothing is ever written.
+        let none = svc
+            .explain_activities(&["missing".to_string()])
+            .await
+            .unwrap();
+        assert!(none.is_empty());
+        assert!(assignments.writes.lock().unwrap().is_empty());
+    }
+
+    /// The guard asks what the rules say about a transaction the user has
+    /// just filed by hand: their payee decides which payee-condition rule
+    /// matches, and their category does not hide the rule that would set one.
+    #[tokio::test]
+    async fn explain_matches_payee_conditions_on_the_payee_the_user_set() {
+        let (svc, _, _) = mk_payee_svc(
+            vec![
+                mk_rule("payee", "NETFLIX", PAYEES_TAXONOMY, "payee_netflix", 0),
+                mk_payee_condition_rule("amazon", "payee_amazon", "cat_shopping", 0),
+                mk_payee_condition_rule("netflix", "payee_netflix", "cat_streaming", 0),
+            ],
+            vec![mk_activity("act", "acct1", "NETFLIX.COM")],
+            vec![
+                mk_assignment("act", PAYEES_TAXONOMY, "payee_amazon", "manual"),
+                mk_assignment("act", "spending_categories", "cat_other", "manual"),
+            ],
+        );
+
+        let explained = explain_one(&svc, "act").await;
+        assert_eq!(explained.payee_id.as_deref(), Some("payee_amazon"));
+        // The text still says Netflix: that is the rule to offer to update.
+        assert_eq!(
+            named(&explained.payee_rule),
+            Some(("payee", PAYEES_TAXONOMY, "payee_netflix"))
+        );
+        assert_eq!(
+            named(&explained.category_rule),
+            Some(("amazon", "spending_categories", "cat_shopping"))
+        );
+    }
+
+    #[tokio::test]
+    async fn explain_reads_the_bank_text_not_the_notes() {
+        let mut edited = mk_activity("edited", "acct1", "Weekly shop");
+        edited.imported_description = Some("TESCO STORES 3301".to_string());
+        let (svc, _, _) = mk_svc(
+            vec![
+                mk_rule("tesco", "TESCO", "spending_categories", "cat_groceries", 5),
+                mk_rule("weekly", "WEEKLY", "spending_categories", "cat_other", 9),
+            ],
+            vec![edited, mk_activity("typed", "acct1", "Weekly shop")],
+        );
+
+        let edited = explain_one(&svc, "edited").await;
+        assert_eq!(edited.bank_text.as_deref(), Some("TESCO STORES 3301"));
+        assert_eq!(
+            named(&edited.category_rule),
+            Some(("tesco", "spending_categories", "cat_groceries"))
+        );
+        let typed = explain_one(&svc, "typed").await;
+        assert_eq!(typed.bank_text.as_deref(), Some("Weekly shop"));
+        assert_eq!(
+            named(&typed.category_rule),
+            Some(("weekly", "spending_categories", "cat_other"))
+        );
+    }
+
+    #[tokio::test]
+    async fn explain_breaks_ties_as_a_run_does() {
+        let exact = {
+            let mut rule = mk_rule("exact", "COFFEE BAR", "spending_categories", "cat_cafe", 3);
+            rule.match_type = RuleMatchType::Exact;
+            rule
+        };
+        let rules = vec![
+            // Equal priority: the exact text beats the fragment listed first.
+            mk_rule("fragment", "COFFEE", "spending_categories", "cat_other", 3),
+            exact,
+            // A lower priority never wins, however specific.
+            mk_payee_condition_rule("payee", "payee_bakery", "cat_bakery", 1),
+            // A rule of another taxonomy cannot apply to a withdrawal.
+            mk_rule("income", "COFFEE", "income_sources", "cat_salary", 9),
+        ];
+        let (svc, _, _) = mk_payee_svc(
+            rules.clone(),
+            vec![mk_activity("act", "acct1", "Coffee Bar")],
+            vec![mk_assignment(
+                "act",
+                PAYEES_TAXONOMY,
+                "payee_bakery",
+                "manual",
+            )],
+        );
+        let explained = explain_one(&svc, "act").await;
+        assert_eq!(
+            named(&explained.category_rule),
+            Some(("exact", "spending_categories", "cat_cafe"))
+        );
+
+        // What it names is what a run writes.
+        let (svc, _, assignments) = mk_payee_svc(
+            rules,
+            vec![mk_activity("act", "acct1", "Coffee Bar")],
+            vec![],
+        );
+        svc.rerun_detailed(&["acct1".to_string()], false)
+            .await
+            .unwrap();
+        assert_eq!(
+            applied(&assignments),
+            vec![row("act", "spending_categories", "cat_cafe")]
+        );
+    }
+
+    #[tokio::test]
+    async fn explain_names_the_category_rule_that_also_sets_the_payee() {
+        let mut both = mk_rule("both", "BAKERY", "spending_categories", "cat_bakery", 0);
+        both.set_payee_id = Some("payee_bakery".to_string());
+        let mut gone = mk_rule("gone", "BAKERY", "spending_categories", "cat_other", 5);
+        gone.payee_condition_id = Some("payee_gone".to_string());
+        let (svc, _, _) = mk_payee_svc(
+            vec![both, gone],
+            vec![mk_activity("act", "acct1", "CORNER BAKERY")],
+            vec![],
+        );
+
+        let explained = explain_one(&svc, "act").await;
+        assert_eq!(
+            named(&explained.payee_rule),
+            Some(("both", PAYEES_TAXONOMY, "payee_bakery"))
+        );
+        // A rule on a payee that no longer exists matches nothing.
+        assert_eq!(
+            named(&explained.category_rule),
+            Some(("both", "spending_categories", "cat_bakery"))
         );
     }
 }

@@ -252,12 +252,17 @@ impl<'c, 'r> RulePasses<'c, 'r> {
     /// sets, whichever of them ranks first. `input.payee_id` is not read: no
     /// rule that sets a payee can match on one.
     pub fn planned_payee(&self, input: &RuleInput<'_>) -> Option<&'r str> {
+        self.payee_setter(input)
+            .and_then(|rule| rule.payee_to_set())
+    }
+
+    /// The rule [`Self::planned_payee`] takes the payee from.
+    pub fn payee_setter(&self, input: &RuleInput<'_>) -> Option<&'r CategorizationRule> {
         let input = RuleInput {
             payee_id: None,
             ..*input
         };
-        match_compiled(self.payee_setters.iter().copied(), &input)
-            .and_then(|m| m.rule.payee_to_set())
+        match_compiled(self.payee_setters.iter().copied(), &input).map(|m| m.rule)
     }
 
     /// The rules of the category pass: every rule but the payee rules.
