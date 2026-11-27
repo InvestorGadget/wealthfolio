@@ -1254,6 +1254,12 @@
       "clear_filters": "Filter zurücksetzen",
       "recategorize_confirm_title": "Alle Aktivitäten neu kategorisieren?",
       "recategorize_confirm_desc": "Dadurch werden alle Regeln erneut auf jede Aktivität in Ihren Ausgabenkonten angewendet und bestehende automatisch kategorisierte Zuordnungen können überschrieben werden. Manuelle Kategorisierungen bleiben erhalten."
+    },
+    "rule_suggestions": {
+      "title": "Regeln vorschlagen, nachdem ich kategorisiert habe",
+      "description": "Nachdem Sie eine Kategorie oder einen Zahlungsempfänger von Hand gesetzt haben, wird angeboten, daraus eine Regel zu machen. Ohne Ihre Bestätigung wird nichts erstellt. Diese Einstellung gilt für dieses Gerät.",
+      "held": "Vorschläge sind für heute pausiert oder für einige Zahlungsempfänger stummgeschaltet.",
+      "resume": "Wieder vorschlagen"
     }
   },
   "privacy": "Datenschutz",

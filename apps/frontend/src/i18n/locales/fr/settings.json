@@ -1308,6 +1308,12 @@
       "clear_filters": "Effacer les filtres",
       "recategorize_confirm_title": "Recatégoriser toutes les activités ?",
       "recategorize_confirm_desc": "Cela réexécutera toutes les règles sur chaque activité de vos comptes de dépenses et pourrait écraser les attributions auto-catégorisées existantes. Les catégorisations manuelles sont préservées."
+    },
+    "rule_suggestions": {
+      "title": "Suggérer des règles après une catégorisation",
+      "description": "Après avoir défini une catégorie ou un bénéficiaire à la main, proposer d'en faire une règle. Rien n'est créé sans votre confirmation. Ce choix est conservé sur cet appareil.",
+      "held": "Les suggestions sont en pause pour aujourd'hui ou désactivées pour certains bénéficiaires.",
+      "resume": "Suggérer à nouveau"
     }
   },
   "fx_title": "Taux de change",

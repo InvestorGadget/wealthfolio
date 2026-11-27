@@ -18,9 +18,11 @@ import {
   getTransactionDisplay,
   getTransferLinkStatus,
   isTransferCashActivity,
+  rowCategory,
   type TransactionRowVM,
 } from "../lib/transactions-helpers";
 import { canConvertToTransfer } from "@/pages/activity/components/transfer-link-utils";
+import { useRuleSuggestions } from "./rule-suggestion-provider";
 
 export interface TransactionRowActionsProps {
   row: TransactionRowVM;
@@ -53,6 +55,7 @@ export function TransactionRowActions({
   triggerClassName = cn("data-popup-open:opacity-100 h-7 w-7", HOVER_SLOT),
 }: TransactionRowActionsProps) {
   const { t } = useTranslation();
+  const ruleSuggestions = useRuleSuggestions();
   const a = row.activity;
   const { isIncome, isNeutral } = getTransactionDisplay(a, account?.accountType);
   const activityType = getEffectiveCashActivityType(a);
@@ -93,6 +96,12 @@ export function TransactionRowActions({
           <DropdownMenuItem onClick={() => onEditSplits(row)}>
             <Icons.SplitHorizontal className="me-2 h-4 w-4" aria-hidden="true" />
             {t("spending:transactions.splitTransaction")}
+          </DropdownMenuItem>
+        )}
+        {ruleSuggestions && !isNeutral && (
+          <DropdownMenuItem onClick={() => ruleSuggestions.createRuleFor(a.id, rowCategory(row))}>
+            <Icons.ListFilter className="me-2 h-4 w-4" aria-hidden="true" />
+            {t("spending:transactions.createRule")}
           </DropdownMenuItem>
         )}
         <DropdownMenuItem onClick={() => onDuplicate(row)}>

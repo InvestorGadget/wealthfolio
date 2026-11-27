@@ -213,7 +213,8 @@
     "linkTransfer": "連結轉帳……",
     "deleteConfirmMany_other": "確定要刪除 {{count}} 筆交易嗎？",
     "deleteConfirmMany_one": "確定要刪除 {{count}} 筆交易嗎？",
-    "convertToTransfer": "轉為轉帳..."
+    "convertToTransfer": "轉為轉帳...",
+    "createRule": "建立規則"
   },
   "cashFlow": {
     "income": "收入",
@@ -1179,5 +1180,26 @@
     "saveCategoryFirst": "請先儲存類別，再修改類型或帳戶。",
     "typeNotForAccount": "此帳戶不支援該類型。",
     "amountRequired": "金額為必填欄位。"
+  },
+  "ruleSuggestion": {
+    "title": "以後類似的交易都這樣處理嗎？",
+    "descPayee": "每當收款方為{{payee}}時，設定為{{target}}。",
+    "descText": "每當銀行摘要為「{{text}}」時，設定為{{target}}。",
+    "descTextWithPayee": "每當銀行摘要為「{{text}}」時，設定為{{target}}並將收款方設為{{payee}}。",
+    "createRule": "建立規則",
+    "updateTitle": "已有規則設定為{{target}}，要更新它嗎？",
+    "updateDescription": "規則「{{rule}}」對此類交易的歸類與您的選擇不同。",
+    "updateRule": "更新規則",
+    "notToday": "今天不再提示",
+    "mutePayee": "不再為{{payee}}提示",
+    "settingsHint": "您可以在「設定 › 支出追蹤」中關閉建議。",
+    "applyTitle_one": "套用到 {{count}} 筆相符的未分類交易嗎？",
+    "applyTitle_other": "套用到 {{count}} 筆相符的未分類交易嗎？",
+    "applyKept_one": "您手動分類的 {{count}} 筆交易將維持不變。",
+    "applyKept_other": "您手動分類的 {{count}} 筆交易將維持不變。",
+    "applyKeepsManual": "您手動分類的交易將維持不變。",
+    "applyConfirm": "套用",
+    "applyLater": "暫不",
+    "unavailable": "無法為此交易準備規則。"
   }
 }

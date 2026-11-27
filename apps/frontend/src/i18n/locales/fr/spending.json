@@ -218,7 +218,8 @@
     "deleteConfirmMany_one": "Voulez-vous vraiment supprimer {{count}} transaction ?",
     "deleteConfirmMany_other": "Voulez-vous vraiment supprimer {{count}} transactions ?",
     "deleteConfirmMany_many": "Voulez-vous vraiment supprimer {{count}} transactions ?",
-    "convertToTransfer": "Convertir en virement..."
+    "convertToTransfer": "Convertir en virement...",
+    "createRule": "Créer une règle"
   },
   "cashFlow": {
     "income": "Revenus",
@@ -1238,5 +1239,28 @@
     "saveCategoryFirst": "Enregistrez d’abord la catégorie, puis changez le type ou le compte.",
     "typeNotForAccount": "Ce type n’est pas disponible pour ce compte.",
     "amountRequired": "Le montant est requis."
+  },
+  "ruleSuggestion": {
+    "title": "Toujours faire ainsi pour ce type de transaction ?",
+    "descPayee": "Définir {{target}} chaque fois que le bénéficiaire est {{payee}}.",
+    "descText": "Définir {{target}} chaque fois que le libellé bancaire est « {{text}} ».",
+    "descTextWithPayee": "Définir {{target}} et le bénéficiaire {{payee}} chaque fois que le libellé bancaire est « {{text}} ».",
+    "createRule": "Créer une règle",
+    "updateTitle": "Une règle définit {{target}} — la modifier ?",
+    "updateDescription": "La règle « {{rule}} » classe ce type de transaction autrement que votre choix.",
+    "updateRule": "Modifier la règle",
+    "notToday": "Pas aujourd'hui",
+    "mutePayee": "Ne pas suggérer pour {{payee}}",
+    "settingsHint": "Vous pouvez désactiver les suggestions dans Paramètres › Suivi des dépenses.",
+    "applyTitle_one": "Appliquer à {{count}} transaction non catégorisée correspondante ?",
+    "applyTitle_many": "Appliquer à {{count}} transactions non catégorisées correspondantes ?",
+    "applyTitle_other": "Appliquer à {{count}} transactions non catégorisées correspondantes ?",
+    "applyKept_one": "{{count}} transaction catégorisée à la main est conservée telle quelle.",
+    "applyKept_many": "{{count}} transactions catégorisées à la main sont conservées telles quelles.",
+    "applyKept_other": "{{count}} transactions catégorisées à la main sont conservées telles quelles.",
+    "applyKeepsManual": "Les transactions catégorisées à la main sont conservées telles quelles.",
+    "applyConfirm": "Appliquer",
+    "applyLater": "Pas maintenant",
+    "unavailable": "Impossible de préparer une règle pour cette transaction."
   }
 }

@@ -13,6 +13,7 @@ import {
   getTransactionDisplay,
   getTransferLinkStatus,
   isTransferCashActivity,
+  rowCategory,
   type TransactionRowVM,
 } from "../lib/transactions-helpers";
 import { ActionPalette } from "@/components/action-palette";
@@ -20,6 +21,7 @@ import { canConvertToTransfer } from "@/pages/activity/components/transfer-link-
 
 import { CategoryIcon } from "./category-chips";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
+import { useRuleSuggestions } from "./rule-suggestion-provider";
 import { SelectionCheckbox } from "./selection-checkbox";
 import { QuickEventPopover } from "./quick-event-popover";
 import {
@@ -94,6 +96,7 @@ function TransactionCardImpl({
   const [menuOpen, setMenuOpen] = useState(false);
 
   const { t } = useTranslation();
+  const ruleSuggestions = useRuleSuggestions();
   const a = row.activity;
   const title = getTransactionTitle(a);
   const bankText = getDifferingBankText(a);
@@ -348,6 +351,15 @@ function TransactionCardImpl({
                         icon: Icons.SplitHorizontal,
                         label: t("spending:transactions.splitTransaction"),
                         onClick: () => onEditSplits(row),
+                      },
+                    ]
+                  : []),
+                ...(ruleSuggestions && !isNeutral
+                  ? [
+                      {
+                        icon: Icons.ListFilter,
+                        label: t("spending:transactions.createRule"),
+                        onClick: () => ruleSuggestions.createRuleFor(a.id, rowCategory(row)),
                       },
                     ]
                   : []),

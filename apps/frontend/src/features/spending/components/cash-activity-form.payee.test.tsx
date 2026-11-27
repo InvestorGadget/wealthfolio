@@ -66,6 +66,10 @@ vi.mock("./quick-event-popover", () => ({
   ),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+const suggestAfterEdit = vi.hoisted(() => vi.fn());
+vi.mock("./rule-suggestion-provider", () => ({
+  useRuleSuggestions: () => ({ suggestAfterEdit, createRuleFor: vi.fn() }),
+}));
 vi.mock("@/adapters", () => ({
   createActivity: vi.fn(),
   findTransferMatchCandidates: vi.fn(() => Promise.resolve([])),
@@ -412,5 +416,99 @@ describe("CashActivityForm payee", () => {
       expect.objectContaining({ id: "created", accountId: "chequing" }),
     );
     expect(setActivityPayee).toHaveBeenLastCalledWith("created", "Corner Bakery", onFile.payees);
+  });
+});
+
+describe("CashActivityForm rule suggestion", () => {
+  const filed = { ...charge, categoryTaxonomyId: "spending_categories", categoryId: "a" };
+  const save = async (user: ReturnType<typeof userEvent.setup>, onOpenChange = vi.fn()) => {
+    await user.click(screen.getByRole("button", { name: /update|create/i }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    onFile.payees = [payee("p1", "Corner Bakery"), payee("p2", "City Water")];
+    onFile.payeeName = "";
+    vi.mocked(createActivity).mockResolvedValue({ id: "created" } as Activity);
+  });
+
+  it("offers a rule for the category an edit changed", async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    render(<CashActivityForm open onOpenChange={onOpenChange} activity={filed} />, { wrapper });
+    await user.click(screen.getByRole("button", { name: "Category b" }));
+    await save(user, onOpenChange);
+
+    expect(suggestAfterEdit).toHaveBeenCalledTimes(1);
+    expect(suggestAfterEdit).toHaveBeenCalledWith(["act-1"], {
+      category: { taxonomyId: "spending_categories", categoryId: "b" },
+      payeeChanged: false,
+    });
+  });
+
+  it("says so when the payee and the category were both set", async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    render(<CashActivityForm open onOpenChange={onOpenChange} activity={charge} />, { wrapper });
+    await user.click(screen.getByRole("button", { name: "Category a" }));
+    await pickPayee(user, "Corner Bakery");
+    await save(user, onOpenChange);
+
+    expect(suggestAfterEdit).toHaveBeenCalledWith(["act-1"], {
+      category: { taxonomyId: "spending_categories", categoryId: "a" },
+      payeeChanged: true,
+    });
+  });
+
+  it("reports nothing filed when the category and payee are saved as they were", async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    onFile.payeeName = "City Water";
+    render(<CashActivityForm open onOpenChange={onOpenChange} activity={filed} />, { wrapper });
+    // Picking what is already there, then saving another field's edit.
+    await user.click(screen.getByRole("button", { name: "Category a" }));
+    await pickPayee(user, "City Water");
+    await user.click(screen.getByRole("button", { name: "Event trip" }));
+    await save(user, onOpenChange);
+
+    expect(assignActivityCategory).not.toHaveBeenCalled();
+    expect(setActivityPayee).not.toHaveBeenCalled();
+    // The provider offers nothing for an edit that set neither.
+    expect(suggestAfterEdit).toHaveBeenCalledWith(["act-1"], {
+      category: undefined,
+      payeeChanged: false,
+    });
+  });
+
+  it("reports nothing filed when a retry puts back the category the form opened with", async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    vi.mocked(setActivityPayee).mockRejectedValueOnce(new Error("offline"));
+    render(<CashActivityForm open onOpenChange={onOpenChange} activity={filed} />, { wrapper });
+    await user.click(screen.getByRole("button", { name: "Category b" }));
+    await pickPayee(user, "Corner Bakery");
+    await user.click(screen.getByRole("button", { name: /update/i }));
+    await waitFor(() => expect(setActivityPayee).toHaveBeenCalledTimes(1));
+    expect(suggestAfterEdit).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Category a" }));
+    await save(user, onOpenChange);
+    expect(suggestAfterEdit).toHaveBeenCalledWith(["act-1"], {
+      category: undefined,
+      payeeChanged: true,
+    });
+  });
+
+  it("offers nothing for a transaction that was just entered", async () => {
+    const user = userEvent.setup();
+    const onOpenChange = vi.fn();
+    render(<CashActivityForm open onOpenChange={onOpenChange} intent="expense" />, { wrapper });
+    await user.click(screen.getByRole("button", { name: "Category a" }));
+    await pickPayee(user, "Corner Bakery");
+    await save(user, onOpenChange);
+
+    expect(setActivityPayee).toHaveBeenCalledTimes(1);
+    expect(suggestAfterEdit).not.toHaveBeenCalled();
   });
 });

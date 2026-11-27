@@ -53,6 +53,13 @@ export interface TransactionRowVM {
   needsReview: boolean;
 }
 
+/** The category a row is filed under, as a rule's target. */
+export function rowCategory(
+  row: TransactionRowVM,
+): { taxonomyId: string; categoryId: string } | null {
+  return row.category ? { taxonomyId: row.category.taxonomyId, categoryId: row.category.id } : null;
+}
+
 /**
  * The sign a row renders, taken from the server's signed cash movement so the
  * figures on screen add up to the nets reported beside them. Positive is money

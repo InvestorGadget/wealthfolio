@@ -1249,6 +1249,12 @@
       "clear_filters": "清除筛选",
       "recategorize_confirm_title": "重新分类所有活动？",
       "recategorize_confirm_desc": "这将对您支出账户中的每项活动重新运行所有规则，可能会覆盖现有的自动分类分配。手动分类会被保留。"
+    },
+    "rule_suggestions": {
+      "title": "在我分类后建议规则",
+      "description": "在您手动设置分类或收款方后，提示将其设为规则。未经您确认不会创建任何内容。此选项保存在本设备上。",
+      "held": "建议今天已暂停，或已对部分收款方关闭。",
+      "resume": "重新提示"
     }
   },
   "addons_updates_critical_one": "（{{count}} 项关键）",

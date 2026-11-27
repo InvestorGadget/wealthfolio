@@ -1225,6 +1225,12 @@
       "clear_filters": "Clear filters",
       "recategorize_confirm_title": "Re-categorize all activities?",
       "recategorize_confirm_desc": "This will re-run all rules against every activity in your spending accounts and may overwrite existing auto-categorized assignments. Manual categorizations are preserved."
+    },
+    "rule_suggestions": {
+      "title": "Suggest rules after I categorize",
+      "description": "After you set a category or payee by hand, offer to make it a rule. Nothing is created until you confirm. This choice is kept on this device.",
+      "held": "Suggestions are paused for today or silenced for some payees.",
+      "resume": "Suggest again"
     }
   },
   "addons_updates_critical_one": "({{count}} critical)",

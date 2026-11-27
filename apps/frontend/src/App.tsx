@@ -8,6 +8,7 @@ import { AssetLogoRegistrySync } from "@/components/asset-logo-registry-sync";
 import { Toaster } from "@/components/sonner";
 import { AuthGate, AuthProvider } from "@/context/auth-context";
 import { EventDialogProvider } from "@/features/spending/components/event-dialog-provider";
+import { RuleSuggestionProvider } from "@/features/spending/components/rule-suggestion-provider";
 import { WealthfolioConnectProvider } from "@/features/wealthfolio-connect";
 import { useAndroidSystemBars } from "@/hooks/use-android-system-bars";
 import { AppDirectionProvider } from "@/i18n/direction";
@@ -51,8 +52,10 @@ function App() {
             <AddonRuntimeLoader />
             <ActivitySplitReviewProvider>
               <EventDialogProvider>
-                <AssetLogoRegistrySync />
-                <AppRoutes />
+                <RuleSuggestionProvider>
+                  <AssetLogoRegistrySync />
+                  <AppRoutes />
+                </RuleSuggestionProvider>
               </EventDialogProvider>
             </ActivitySplitReviewProvider>
           </TooltipProvider>

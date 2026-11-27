@@ -212,7 +212,8 @@
     "unlinkTransfer": "이체 연결 해제",
     "linkTransfer": "이체 연결...",
     "deleteConfirmMany_other": "거래 {{count}}건을 삭제하시겠습니까?",
-    "convertToTransfer": "이체로 변환..."
+    "convertToTransfer": "이체로 변환...",
+    "createRule": "규칙 생성"
   },
   "cashFlow": {
     "income": "수입",
@@ -1167,5 +1168,26 @@
     "saveCategoryFirst": "카테고리를 먼저 저장한 다음 유형이나 계좌를 변경하세요.",
     "typeNotForAccount": "이 유형은 이 계좌에서 사용할 수 없습니다.",
     "amountRequired": "금액은 필수입니다."
+  },
+  "ruleSuggestion": {
+    "title": "이와 같은 거래에 항상 이렇게 할까요?",
+    "descPayee": "거래처가 {{payee}}일 때마다 {{target}}을(를) 설정합니다.",
+    "descText": "은행 적요가 “{{text}}”일 때마다 {{target}}을(를) 설정합니다.",
+    "descTextWithPayee": "은행 적요가 “{{text}}”일 때마다 {{target}} 및 거래처 {{payee}}을(를) 설정합니다.",
+    "createRule": "규칙 생성",
+    "updateTitle": "규칙이 {{target}}을(를) 설정합니다. 업데이트할까요?",
+    "updateDescription": "규칙 “{{rule}}”은(는) 이와 같은 거래를 선택하신 것과 다르게 분류합니다.",
+    "updateRule": "규칙 업데이트",
+    "notToday": "오늘은 그만",
+    "mutePayee": "{{payee}}에는 제안하지 않기",
+    "settingsHint": "제안은 설정 › 지출 트래커에서 끌 수 있습니다.",
+    "applyTitle_one": "일치하는 미분류 거래 {{count}}건에 적용할까요?",
+    "applyTitle_other": "일치하는 미분류 거래 {{count}}건에 적용할까요?",
+    "applyKept_one": "직접 분류한 거래 {{count}}건은 그대로 유지됩니다.",
+    "applyKept_other": "직접 분류한 거래 {{count}}건은 그대로 유지됩니다.",
+    "applyKeepsManual": "직접 분류한 거래는 그대로 유지됩니다.",
+    "applyConfirm": "적용",
+    "applyLater": "나중에",
+    "unavailable": "이 거래에 대한 규칙을 준비할 수 없습니다."
   }
 }

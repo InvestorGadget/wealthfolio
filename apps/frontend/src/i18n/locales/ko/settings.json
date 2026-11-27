@@ -1249,6 +1249,12 @@
       "clear_filters": "필터 지우기",
       "recategorize_confirm_title": "모든 활동을 재분류하시겠습니까?",
       "recategorize_confirm_desc": "지출 계좌의 모든 활동에 모든 규칙을 다시 실행하며, 기존의 자동 분류된 항목을 덮어쓸 수 있습니다. 수동 분류는 유지됩니다."
+    },
+    "rule_suggestions": {
+      "title": "분류한 후 규칙 제안",
+      "description": "카테고리나 거래처를 직접 설정한 후 이를 규칙으로 만들도록 제안합니다. 확인하기 전에는 아무것도 생성되지 않습니다. 이 설정은 이 기기에 저장됩니다.",
+      "held": "제안이 오늘 하루 일시 중지되었거나 일부 거래처에 대해 꺼져 있습니다.",
+      "resume": "다시 제안"
     }
   },
   "addons_updates_critical_one": "(긴급 {{count}}개)",

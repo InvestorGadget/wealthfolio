@@ -1170,7 +1170,8 @@
     "splitTransaction": "تقسيم المعاملة",
     "tagEvent": "وسم الحدث",
     "unlinkTransfer": "إلغاء ربط التحويل",
-    "convertToTransfer": "جعله تحويلاً..."
+    "convertToTransfer": "جعله تحويلاً...",
+    "createRule": "إنشاء قاعدة"
   },
   "txTab": {
     "addFirst": "أضف معاملتك الأولى للبدء.",
@@ -1415,5 +1416,34 @@
     "saveCategoryFirst": "احفظ الفئة أولًا، ثم غيّر النوع أو الحساب.",
     "typeNotForAccount": "هذا النوع غير متاح لهذا الحساب.",
     "amountRequired": "المبلغ مطلوب."
+  },
+  "ruleSuggestion": {
+    "title": "هل تريد فعل ذلك دائمًا مع المعاملات المشابهة؟",
+    "descPayee": "تعيين {{target}} كلما كان المستفيد {{payee}}.",
+    "descText": "تعيين {{target}} كلما كان وصف البنك «{{text}}».",
+    "descTextWithPayee": "تعيين {{target}} والمستفيد {{payee}} كلما كان وصف البنك «{{text}}».",
+    "createRule": "إنشاء قاعدة",
+    "updateTitle": "توجد قاعدة تعيّن {{target}} — هل تريد تحديثها؟",
+    "updateDescription": "القاعدة «{{rule}}» تصنّف المعاملات المشابهة بشكل مختلف عمّا اخترته.",
+    "updateRule": "تحديث القاعدة",
+    "notToday": "ليس اليوم",
+    "mutePayee": "عدم الاقتراح لـ {{payee}}",
+    "settingsHint": "يمكنك إيقاف الاقتراحات من الإعدادات › متتبع الإنفاق.",
+    "applyTitle_zero": "هل تريد التطبيق على {{count}} معاملة مطابقة غير مصنفة؟",
+    "applyTitle_one": "هل تريد التطبيق على معاملة واحدة مطابقة غير مصنفة؟",
+    "applyTitle_two": "هل تريد التطبيق على معاملتين مطابقتين غير مصنفتين؟",
+    "applyTitle_few": "هل تريد التطبيق على {{count}} معاملات مطابقة غير مصنفة؟",
+    "applyTitle_many": "هل تريد التطبيق على {{count}} معاملة مطابقة غير مصنفة؟",
+    "applyTitle_other": "هل تريد التطبيق على {{count}} معاملة مطابقة غير مصنفة؟",
+    "applyKept_zero": "تبقى {{count}} معاملة صنّفتها يدويًا كما هي.",
+    "applyKept_one": "تبقى معاملة واحدة صنّفتها يدويًا كما هي.",
+    "applyKept_two": "تبقى معاملتان صنّفتهما يدويًا كما هما.",
+    "applyKept_few": "تبقى {{count}} معاملات صنّفتها يدويًا كما هي.",
+    "applyKept_many": "تبقى {{count}} معاملة صنّفتها يدويًا كما هي.",
+    "applyKept_other": "تبقى {{count}} معاملة صنّفتها يدويًا كما هي.",
+    "applyKeepsManual": "تبقى المعاملات التي صنّفتها يدويًا كما هي.",
+    "applyConfirm": "تطبيق",
+    "applyLater": "ليس الآن",
+    "unavailable": "تعذّر تجهيز قاعدة لهذه المعاملة."
   }
 }
