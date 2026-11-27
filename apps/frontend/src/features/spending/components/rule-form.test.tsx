@@ -5,10 +5,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   RuleForm,
   buildRuleFormSchema,
+  newRuleFromFormValues,
   ruleAmountPayload,
   type RuleFormState,
   type RuleFormValues,
 } from "./rule-form";
+import type { RulePrefill } from "../lib/rule-suggestion";
 import type { CategorizationRule } from "../types/rule";
 
 vi.mock("@/hooks/use-taxonomies", () => {
@@ -356,6 +358,143 @@ describe("rule form payee fields", () => {
     expect(await submitted(onSubmit)).toMatchObject({
       pattern: "(?i)^(?:AT\\&T|Disney\\+|C\\.O\\.D\\.)$",
       matchType: "regex",
+    });
+  });
+});
+
+describe("rule form opened from a suggestion", () => {
+  const options = [
+    {
+      value: "spending_categories:cat_food",
+      label: "Food",
+      taxonomyId: "spending_categories",
+      categoryId: "cat_food",
+    },
+    { value: "payees:p1", label: "Corner Bakery", taxonomyId: "payees", categoryId: "p1" },
+  ];
+  const renderPrefilled = (prefill: RulePrefill) => {
+    const onSubmit = vi.fn<(values: RuleFormValues) => void>();
+    render(
+      <RuleForm
+        prefill={prefill}
+        categoryOptions={options}
+        accountOptions={[]}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+    return onSubmit;
+  };
+  const create = async (onSubmit: ReturnType<typeof renderPrefilled>) => {
+    const user = userEvent.setup();
+    // A new rule, not an edit: nothing exists until this is pressed.
+    await user.click(screen.getByRole("button", { name: "Create rule" }));
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    return onSubmit.mock.calls[0][0];
+  };
+
+  it("opens on a payee condition and the category, with the existing defaults", async () => {
+    const onSubmit = renderPrefilled({
+      name: "Corner Bakery",
+      pattern: "",
+      matchType: "contains",
+      taxonomyId: "spending_categories",
+      categoryId: "cat_food",
+      payeeConditionId: "p1",
+      setPayeeId: null,
+    });
+    expect(screen.getByDisplayValue("Corner Bakery")).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    expect(await create(onSubmit)).toMatchObject({
+      name: "Corner Bakery",
+      pattern: "",
+      taxonomyId: "spending_categories",
+      categoryId: "cat_food",
+      payeeConditionId: "p1",
+      setPayeeId: null,
+      // Not narrowed: every account, any type, any amount, the usual priority.
+      accountId: null,
+      activityType: "",
+      amountOp: "",
+      priority: 0,
+    });
+  });
+
+  it("opens on the exact bank text, which also sets the payee", async () => {
+    const onSubmit = renderPrefilled({
+      name: "Corner Bakery",
+      pattern: "CORNER BAKERY 0042",
+      matchType: "exact",
+      taxonomyId: "spending_categories",
+      categoryId: "cat_food",
+      payeeConditionId: null,
+      setPayeeId: "p1",
+    });
+    expect(screen.getByDisplayValue("CORNER BAKERY 0042")).toBeInTheDocument();
+
+    expect(await create(onSubmit)).toMatchObject({
+      pattern: "CORNER BAKERY 0042",
+      matchType: "exact",
+      categoryId: "cat_food",
+      payeeConditionId: null,
+      setPayeeId: "p1",
+    });
+  });
+
+  it("opens on a payee as the target of a payee-only rule", async () => {
+    const onSubmit = renderPrefilled({
+      name: "Corner Bakery",
+      pattern: "CORNER BAKERY 0042",
+      matchType: "exact",
+      taxonomyId: "payees",
+      categoryId: "p1",
+      payeeConditionId: null,
+      setPayeeId: null,
+    });
+    expect(await create(onSubmit)).toMatchObject({
+      pattern: "CORNER BAKERY 0042",
+      matchType: "exact",
+      taxonomyId: "payees",
+      categoryId: "p1",
+      setPayeeId: null,
+    });
+  });
+});
+
+describe("newRuleFromFormValues", () => {
+  it("is the rule the form's values create", () => {
+    expect(
+      newRuleFromFormValues({
+        name: "Coffee",
+        pattern: "STARBUCKS",
+        matchType: "exact",
+        taxonomyId: "spending_categories",
+        categoryId: "cat_food",
+        activityType: "",
+        amountOp: "gt",
+        amountValue: "5",
+        amountValue2: "",
+        priority: 2,
+        accountId: "acct",
+        payeeConditionId: null,
+        setPayeeId: "p1",
+      }),
+    ).toEqual({
+      name: "Coffee",
+      pattern: "STARBUCKS",
+      matchType: "exact",
+      taxonomyId: "spending_categories",
+      categoryId: "cat_food",
+      activityType: null,
+      amountOp: "gt",
+      amountValue: 5,
+      amountValue2: null,
+      payeeConditionId: null,
+      setPayeeId: "p1",
+      priority: 2,
+      isGlobal: false,
+      accountId: "acct",
     });
   });
 });

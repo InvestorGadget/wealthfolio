@@ -1,4 +1,3 @@
-import { getCategoryLabel } from "@/lib/taxonomy-labels";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate } from "react-router-dom";
@@ -31,9 +30,7 @@ import {
 } from "@wealthfolio/ui";
 import { cn } from "@/lib/utils";
 import { useAccounts } from "@/hooks/use-accounts";
-import { useNameComparator } from "@/hooks/use-name-comparator";
 import { useTaxonomy } from "@/hooks/use-taxonomies";
-import type { TaxonomyCategory } from "@/lib/types";
 
 import { RuleEditModal } from "@/features/spending/components/rule-edit-modal";
 import {
@@ -43,13 +40,7 @@ import {
 } from "@/features/spending/components/rule-item";
 import { PRESET_FLAGS } from "@/features/spending/components/rule-preset-constants";
 import { RulePresetPicker } from "@/features/spending/components/rule-preset-picker";
-import {
-  ruleAmountPayload,
-  type RuleFormAccountOption,
-  type RuleFormCategoryOption,
-  type RuleFormValues,
-} from "@/features/spending/components/rule-form";
-import { isSpendingAccountType } from "@/features/spending/lib/constants";
+import { ruleAmountPayload, type RuleFormValues } from "@/features/spending/components/rule-form";
 import { PAYEES_TAXONOMY_ID } from "@/features/spending/lib/payee";
 import { hasTextCondition, parseAnyOfPattern } from "@/features/spending/lib/rule-conditions";
 import {
@@ -57,6 +48,7 @@ import {
   useCategorizationRules,
   useRulePresets,
 } from "@/features/spending/hooks/use-categorization-rules";
+import { useRuleFormOptions } from "@/features/spending/hooks/use-rule-form-options";
 import { useSpendingSettings } from "@/features/spending/hooks/use-spending-settings";
 import type { CategorizationRule } from "@/features/spending/types/rule";
 
@@ -69,8 +61,7 @@ const SAVINGS_TAXONOMY = "savings_categories";
 
 export default function SpendingRulesPage() {
   const { t } = useTranslation();
-  const compareNames = useNameComparator();
-  const { isEnabled, isLoading: settingsLoading, accountIds } = useSpendingSettings();
+  const { isEnabled, isLoading: settingsLoading } = useSpendingSettings();
   const { accounts } = useAccounts({ filterActive: false });
   const {
     data: rules = [],
@@ -110,33 +101,10 @@ export default function SpendingRulesPage() {
     payees.error?.message ??
     t("settings:spending.rules.load_error");
 
-  const { categoryOptions, categoryMeta } = useMemo(() => {
-    const buildOptions = (taxonomyId: string, cats: TaxonomyCategory[]) => {
-      const byId = new Map(cats.map((c) => [c.id, c]));
-      return cats
-        .slice()
-        .sort((a, b) => a.sortOrder - b.sortOrder)
-        .map((c) => {
-          const parent = c.parentId ? byId.get(c.parentId) : null;
-          return {
-            value: `${taxonomyId}:${c.id}`,
-            label: getCategoryLabel(t, taxonomyId, c.id, c.name),
-            taxonomyId,
-            categoryId: c.id,
-            color: c.color,
-            icon: c.icon ?? null,
-            parentName: parent ? getCategoryLabel(t, taxonomyId, parent.id, parent.name) : null,
-          } satisfies RuleFormCategoryOption;
-        });
-    };
-    const opts: RuleFormCategoryOption[] = [
-      ...buildOptions(SPENDING_TAXONOMY, spending.data?.categories ?? []),
-      ...buildOptions(INCOME_TAXONOMY, income.data?.categories ?? []),
-      ...buildOptions(SAVINGS_TAXONOMY, savings.data?.categories ?? []),
-      ...buildOptions(PAYEES_TAXONOMY_ID, payees.data?.categories ?? []),
-    ];
+  const { categoryOptions, accountOptions } = useRuleFormOptions();
+  const categoryMeta = useMemo(() => {
     const meta: Record<string, RuleCategoryMeta> = {};
-    opts.forEach((o) => {
+    categoryOptions.forEach((o) => {
       const entry = {
         name: o.label,
         color: o.color ?? null,
@@ -145,14 +113,8 @@ export default function SpendingRulesPage() {
       meta[o.value] = entry;
       meta[o.categoryId] ??= entry;
     });
-    return { categoryOptions: opts, categoryMeta: meta };
-  }, [
-    spending.data?.categories,
-    income.data?.categories,
-    savings.data?.categories,
-    payees.data?.categories,
-    t,
-  ]);
+    return meta;
+  }, [categoryOptions]);
 
   const presetMeta = useMemo<Record<string, RulePresetMeta>>(() => {
     const meta: Record<string, RulePresetMeta> = {};
@@ -165,22 +127,15 @@ export default function SpendingRulesPage() {
     return meta;
   }, [presets]);
 
-  const { accountOptions, accountMeta } = useMemo(() => {
-    // Only tracked spending accounts are offered: a rerun walks just those
-    // accounts, so a rule scoped anywhere else could never fire.
-    const tracked = new Set(accountIds);
-    const opts: RuleFormAccountOption[] = accounts
-      .filter((a) => isSpendingAccountType(a.accountType) && tracked.has(a.id))
-      .map((a) => ({ id: a.id, name: a.name }))
-      .sort((a, b) => compareNames(a.name, b.name));
-    // Names cover every account, not just the pickable ones, so a rule scoped to
-    // an account the user has since untracked still renders a real name.
+  // Names cover every account, not just the pickable ones, so a rule scoped to
+  // an account the user has since untracked still renders a real name.
+  const accountMeta = useMemo(() => {
     const meta: Record<string, string> = {};
     accounts.forEach((a) => {
       meta[a.id] = a.name;
     });
-    return { accountOptions: opts, accountMeta: meta };
-  }, [accounts, accountIds, compareNames]);
+    return meta;
+  }, [accounts]);
 
   if (!settingsLoading && !isEnabled) {
     return <Navigate to="/settings/spending" replace />;

@@ -14,12 +14,15 @@ import {
   type RuleFormCategoryOption,
   type RuleFormValues,
 } from "./rule-form";
+import type { RulePrefill } from "../lib/rule-suggestion";
 import type { CategorizationRule } from "../types/rule";
 
 interface RuleEditModalProps {
   open: boolean;
   onClose: () => void;
   rule?: CategorizationRule;
+  /** What a new rule's form opens with. */
+  prefill?: RulePrefill;
   categoryOptions: RuleFormCategoryOption[];
   accountOptions: RuleFormAccountOption[];
   onSave: (values: RuleFormValues) => void;
@@ -30,6 +33,7 @@ export function RuleEditModal({
   open,
   onClose,
   rule,
+  prefill,
   categoryOptions,
   accountOptions,
   onSave,
@@ -47,6 +51,7 @@ export function RuleEditModal({
         </DialogHeader>
         <RuleForm
           rule={rule}
+          prefill={prefill}
           categoryOptions={categoryOptions}
           accountOptions={accountOptions}
           onSubmit={onSave}
