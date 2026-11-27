@@ -36,7 +36,13 @@ import {
   textConditionDraft,
   type TextConditionMode,
 } from "../lib/rule-conditions";
-import type { CategorizationRule, RuleAmountOp, RuleMatchType } from "../types/rule";
+import type { RulePrefill } from "../lib/rule-suggestion";
+import type {
+  CategorizationRule,
+  NewCategorizationRule,
+  RuleAmountOp,
+  RuleMatchType,
+} from "../types/rule";
 import { CategoryIconTile } from "./category-chips";
 import { PayeeCommand } from "./payee-field";
 import { QuickCategorizePopover } from "./quick-categorize-popover";
@@ -101,6 +107,24 @@ export function ruleAmountPayload(
     amountOp,
     amountValue: amountOp ? parseAmount(values.amountValue) : null,
     amountValue2: amountOp === "between" ? parseAmount(values.amountValue2) : null,
+  };
+}
+
+/** The rule a filled-in form creates. */
+export function newRuleFromFormValues(values: RuleFormValues): NewCategorizationRule {
+  return {
+    name: values.name,
+    pattern: values.pattern,
+    matchType: values.matchType,
+    taxonomyId: values.taxonomyId || null,
+    categoryId: values.categoryId || null,
+    activityType: values.activityType || null,
+    ...ruleAmountPayload(values),
+    payeeConditionId: values.payeeConditionId,
+    setPayeeId: values.setPayeeId,
+    priority: values.priority,
+    isGlobal: values.accountId === null,
+    accountId: values.accountId,
   };
 }
 
@@ -233,6 +257,8 @@ interface RuleFormProps {
   rule?: CategorizationRule;
   /** What a new rule's form starts from. Ignored when editing `rule`. */
   draft?: RuleDraft;
+  /** What a new rule's form opens with. Ignored when `rule` is being edited. */
+  prefill?: RulePrefill;
   /** Flat list of what a rule can set: spending, income and savings categories, and payees. */
   categoryOptions: RuleFormCategoryOption[];
   /** Tracked spending accounts the rule can be scoped to. */
@@ -326,6 +352,7 @@ function RulePayeePicker({
 export function RuleForm({
   rule,
   draft,
+  prefill,
   categoryOptions,
   accountOptions,
   onSubmit,
@@ -393,26 +420,28 @@ export function RuleForm({
 
   // The stored text condition as the form edits it: a payee-only rule shows
   // an empty text, never its placeholder, and a compiled list shows the list.
+  // A new rule can open filled in; the user still reviews and saves it.
+  const seed = rule ?? prefill;
   const initialText = useMemo(() => {
-    if (rule) return textConditionDraft(rule);
+    if (seed) return textConditionDraft(seed);
     return textConditionDraft(
       draft?.pattern !== undefined
         ? { pattern: draft.pattern, matchType: draft.matchType ?? "contains" }
         : undefined,
     );
-  }, [rule, draft]);
+  }, [seed, draft]);
 
   const form = useForm<RuleFormState>({
     resolver: zodResolver(ruleFormSchema) as never,
     defaultValues: {
-      name: rule?.name ?? draft?.name ?? "",
+      name: seed?.name ?? draft?.name ?? "",
       pattern: initialText.pattern,
       patternList: initialText.list,
       matchType: initialText.mode,
-      payeeConditionId: rule?.payeeConditionId ?? draft?.payeeConditionId ?? null,
-      setPayeeId: rule?.setPayeeId ?? null,
-      taxonomyId: rule?.taxonomyId ?? draft?.taxonomyId ?? "",
-      categoryId: composite(rule ?? draft), // we encode taxonomyId:categoryId in this single field
+      payeeConditionId: seed?.payeeConditionId ?? draft?.payeeConditionId ?? null,
+      setPayeeId: seed?.setPayeeId ?? null,
+      taxonomyId: seed?.taxonomyId ?? draft?.taxonomyId ?? "",
+      categoryId: composite(seed ?? draft), // we encode taxonomyId:categoryId in this single field
       activityType: rule?.activityType ?? "",
       amountOp: rule?.amountOp ?? "",
       amountValue: rule?.amountValue != null ? String(rule.amountValue) : "",

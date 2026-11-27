@@ -1278,6 +1278,12 @@
       "recategorize_confirm_desc": "這會對支出帳戶中的每筆交易紀錄重新執行所有規則，可能覆寫現有的自動分類。手動分類會保留。",
       "payee_filter": "收款方的規則：{{name}}",
       "payee_filter_clear": "顯示所有規則"
+    },
+    "rule_suggestions": {
+      "title": "在我分類後建議規則",
+      "description": "在您手動設定分類或收款方後，提示將其設為規則。未經您確認不會建立任何內容。此選項儲存在本裝置上。",
+      "held": "建議今天已暫停，或已對部分收款方關閉。",
+      "resume": "重新提示"
     }
   },
   "addons_updates_critical_one": "（{{count}} 項重大更新）",

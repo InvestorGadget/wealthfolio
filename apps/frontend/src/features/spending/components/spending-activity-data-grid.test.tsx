@@ -21,6 +21,7 @@ const harness = vi.hoisted(() => ({
   bulkAssign: vi.fn(),
   unassign: vi.fn(),
   toast: vi.fn(),
+  suggestAfterEdit: vi.fn(),
 }));
 
 vi.mock("@wealthfolio/ui", async (importOriginal) => {
@@ -54,6 +55,12 @@ vi.mock("../hooks/use-cash-activities", () => ({
   useBulkAssignCategories: () => ({ mutateAsync: harness.bulkAssign }),
 }));
 vi.mock("../adapters/cash-activities", () => ({ unassignActivityCategory: harness.unassign }));
+vi.mock("./rule-suggestion-provider", () => ({
+  useRuleSuggestions: () => ({
+    suggestAfterEdit: harness.suggestAfterEdit,
+    createRuleFor: vi.fn(),
+  }),
+}));
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
@@ -172,6 +179,28 @@ describe("SpendingActivityDataGrid", () => {
     ]);
   });
 
+  it("offers a rule for the category the saved rows were all given", async () => {
+    renderGrid([activity(), activity({ id: "a2" })]);
+    edit("a1", { categoryId: "rent" });
+    edit("a2", { categoryId: "rent" });
+    await save();
+
+    expect(harness.suggestAfterEdit).toHaveBeenCalledTimes(1);
+    expect(harness.suggestAfterEdit).toHaveBeenCalledWith(["a1", "a2"], {
+      category: { taxonomyId: "spending_categories", categoryId: "rent" },
+    });
+  });
+
+  it("offers no rule when the saved rows were given different categories", async () => {
+    renderGrid([activity(), activity({ id: "a2" })]);
+    edit("a1", { categoryId: "rent" });
+    edit("a2", { categoryId: "travel" });
+    await save();
+
+    expect(harness.bulkAssign).toHaveBeenCalledTimes(1);
+    expect(harness.suggestAfterEdit).not.toHaveBeenCalled();
+  });
+
   it("saves an amount edit through the shared activity save and writes no category", async () => {
     harness.saveActivities.mockResolvedValue({
       ...NOTHING_SAVED,
@@ -257,6 +286,8 @@ describe("SpendingActivityDataGrid", () => {
     await save();
 
     expect(rows()[0].categoryId).toBe("rent");
+    // A category that was not saved is not one to make a rule of.
+    expect(harness.suggestAfterEdit).not.toHaveBeenCalled();
     expect(harness.toolbar.hasUnsavedChanges).toBe(true);
 
     await save();

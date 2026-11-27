@@ -12,6 +12,7 @@ import { BudgetOverviewCard } from "./components/budget-overview-card";
 import { CategoriesOverviewCard } from "./components/categories-overview-card";
 import { EventTypesOverviewCard } from "./components/event-types-overview-card";
 import { ModuleCard } from "./components/module-card";
+import { RuleSuggestionsToggle } from "./components/rule-suggestions-toggle";
 import { RulesOverviewCard } from "./components/rules-overview-card";
 
 export default function SpendingSettingsPage() {
@@ -107,6 +108,7 @@ export default function SpendingSettingsPage() {
             meta={t("settings:spending.section_automation_meta")}
           >
             <RulesOverviewCard />
+            <RuleSuggestionsToggle />
           </Section>
         </>
       )}

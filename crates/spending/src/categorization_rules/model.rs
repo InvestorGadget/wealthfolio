@@ -238,6 +238,12 @@ pub struct RuleRunScope {
     /// uncategorized-only run too: that mode keeps every existing value.
     #[serde(default)]
     pub override_manual: bool,
+    /// Keep only what these rules contribute to the run. Every rule still
+    /// competes for each activity; an assignment is kept when one of these
+    /// rules wins it. `None` keeps them all. It is how "what would this rule
+    /// fill?" is asked: the counts are then that rule's alone.
+    #[serde(default)]
+    pub rule_ids: Option<Vec<String>>,
 }
 
 impl RuleRunScope {
@@ -404,4 +410,31 @@ pub struct CategorizationRunSummary {
     pub matched: usize,
     #[serde(flatten)]
     pub decisions: crate::activity_assignments::RuleAssignmentResult,
+}
+
+/// A rule that applies to an activity, and what it sets there.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppliedRule {
+    pub rule: CategorizationRule,
+    pub taxonomy_id: String,
+    pub category_id: String,
+}
+
+/// What a full rule run makes of one activity, whatever is on file for it:
+/// the rule that gives it its payee and the rule that gives it its category.
+/// Nothing is written; a category or payee the user set stays theirs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivityRuleExplanation {
+    pub activity_id: String,
+    /// The text rules match (`Activity::bank_text`).
+    pub bank_text: Option<String>,
+    /// The payee the activity is filed under now.
+    pub payee_id: Option<String>,
+    /// The rule a run takes the activity's payee from.
+    pub payee_rule: Option<AppliedRule>,
+    /// The rule a run takes the activity's category from, matched against the
+    /// payee the run leaves on the activity.
+    pub category_rule: Option<AppliedRule>,
 }

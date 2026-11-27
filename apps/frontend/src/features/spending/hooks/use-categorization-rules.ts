@@ -12,6 +12,7 @@ import {
   listRulePresets,
   removeRulePreset,
   rerunCategorizationRulesDetailed,
+  saveRuleWithoutApplying,
   updateCategorizationRule,
 } from "../adapters/rules";
 import { invalidateSpendingCaches } from "../lib/invalidation";
@@ -103,6 +104,30 @@ export function useCategorizationRuleMutations() {
   });
 
   return { create, update, remove, rerun };
+}
+
+/**
+ * Saves a rule the user is about to be asked about applying: it is stored
+ * without the background categorize a rule change normally starts, so that
+ * nothing is filed until they answer. `id` saves over that rule.
+ */
+export function useSaveRuleWithoutApplying() {
+  const qc = useQueryClient();
+  return useMutation<CategorizationRule, Error, { rule: NewCategorizationRule; id?: string }>({
+    mutationFn: ({ rule, id }) => saveRuleWithoutApplying(rule, id),
+    onSuccess: (_saved, { id }) => {
+      qc.invalidateQueries({ queryKey: [QueryKeys.SPENDING_RULES] });
+      toast.success(i18n.t(id ? "common:notifications.rule_updated" : "ai:createRule.ruleCreated"));
+    },
+    onError: (_error, { id }) =>
+      toast.error(
+        i18n.t(
+          id
+            ? "common:notifications.failed_to_update_rule"
+            : "common:notifications.failed_to_create_rule",
+        ),
+      ),
+  });
 }
 
 export function useRulePresets() {

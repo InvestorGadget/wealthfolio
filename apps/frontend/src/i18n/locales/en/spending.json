@@ -239,7 +239,8 @@
     "linkTransfer": "Link transfer...",
     "deleteConfirmMany_one": "Are you sure you want to delete {{count}} transaction?",
     "deleteConfirmMany_other": "Are you sure you want to delete {{count}} transactions?",
-    "convertToTransfer": "Make it a transfer..."
+    "convertToTransfer": "Make it a transfer...",
+    "createRule": "Create rule"
   },
   "cashFlow": {
     "income": "Income",
@@ -1205,5 +1206,26 @@
     "saveCategoryFirst": "Save the category first, then change the type or account.",
     "typeNotForAccount": "This type isn't available for this account.",
     "amountRequired": "Amount is required."
+  },
+  "ruleSuggestion": {
+    "title": "Always do this for transactions like this?",
+    "descPayee": "Set {{target}} whenever the payee is {{payee}}.",
+    "descText": "Set {{target}} whenever the bank's text is “{{text}}”.",
+    "descTextWithPayee": "Set {{target}} and the payee {{payee}} whenever the bank's text is “{{text}}”.",
+    "createRule": "Create rule",
+    "updateTitle": "A rule sets {{target}} — update it?",
+    "updateDescription": "The rule “{{rule}}” files transactions like this differently from what you chose.",
+    "updateRule": "Update rule",
+    "notToday": "Not today",
+    "mutePayee": "Don't suggest for {{payee}}",
+    "settingsHint": "You can turn suggestions off in Settings › Spending tracker.",
+    "applyTitle_one": "Apply to {{count}} matching uncategorized transaction?",
+    "applyTitle_other": "Apply to {{count}} matching uncategorized transactions?",
+    "applyKept_one": "{{count}} transaction you categorized by hand is kept as it is.",
+    "applyKept_other": "{{count}} transactions you categorized by hand are kept as they are.",
+    "applyKeepsManual": "Transactions you categorized by hand are kept as they are.",
+    "applyConfirm": "Apply",
+    "applyLater": "Not now",
+    "unavailable": "A rule could not be prepared for this transaction."
   }
 }

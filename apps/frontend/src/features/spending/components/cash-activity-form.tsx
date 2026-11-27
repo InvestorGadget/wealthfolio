@@ -74,8 +74,10 @@ import {
   unassignActivityCategory,
 } from "../adapters/cash-activities";
 import { useActivityPayee } from "../hooks/use-activity-payee";
-import { PAYEES_TAXONOMY_ID, setActivityPayee } from "../lib/payee";
+import { findPayee, PAYEES_TAXONOMY_ID, setActivityPayee } from "../lib/payee";
+import type { ManualEdit } from "../lib/rule-suggestion";
 import { PayeeField } from "./payee-field";
+import { useRuleSuggestions } from "./rule-suggestion-provider";
 import {
   getActivityTypesForAccount,
   getCashActivityLabel,
@@ -228,6 +230,10 @@ interface SaveSession {
   unrefreshed: boolean;
   /** A save succeeded while this was still the form's opening, and closed it. */
   closedBySave: boolean;
+  /** The payee on file when the form opened; unset until it is known. */
+  openedPayeeName?: string;
+  /** What the saves filed the transaction under by hand, for the rule offered once saved. */
+  filed: ManualEdit;
   /** Each one as last written; unset while it is still as the form opened with. */
   written: {
     /** `taxonomyId:categoryId`, or "" for none. */
@@ -236,10 +242,18 @@ interface SaveSession {
     payeeName?: string;
   };
 }
+/** Whether two names are one payee: the same payee by id, else the same name. */
+const isSamePayee = (a: string, b: string, payees: TaxonomyCategory[]): boolean => {
+  const first = findPayee(payees, a);
+  const second = findPayee(payees, b);
+  if (first && second) return first.id === second.id;
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+};
 const newSaveSession = (): SaveSession => ({
   createdId: null,
   unrefreshed: false,
   closedBySave: false,
+  filed: {},
   written: {},
 });
 
@@ -330,6 +344,7 @@ export function CashActivityForm({
   // The payee is kept beside the form for the same reason: it is saved as an
   // assignment, after the activity. `savedPayeeName` is what is on file.
   const { payees, payeeName: savedPayeeName } = useActivityPayee(activity?.id ?? null);
+  const ruleSuggestions = useRuleSuggestions();
   const [payeeName, setPayeeName] = useState(savedPayeeName);
   // The payee on file can load after the user has picked one: it seeds the
   // field only until they do.
@@ -346,6 +361,12 @@ export function CashActivityForm({
   }, [open, activity?.id]);
   useEffect(() => {
     if (open && !payeeEdited.current) setPayeeName(savedPayeeName);
+    // What the transaction was filed under when the form opened, to tell
+    // afterwards whether a save refiled it. It can load late, but once a save
+    // of this opening has written the payee, what is on file is that write.
+    if (open && session.current.written.payeeName === undefined) {
+      session.current.openedPayeeName = savedPayeeName;
+    }
   }, [open, activity?.id, savedPayeeName]);
   const changePayeeName = (name: string) => {
     payeeEdited.current = true;
@@ -559,11 +580,11 @@ export function CashActivityForm({
 
       // Sync category assignment
       const newCategory = values.category;
-      const oldCategory =
-        written.category ??
-        (activity?.categoryTaxonomyId && activity?.categoryId
+      const openedCategory =
+        activity?.categoryTaxonomyId && activity?.categoryId
           ? `${activity.categoryTaxonomyId}:${activity.categoryId}`
-          : "");
+          : "";
+      const oldCategory = written.category ?? openedCategory;
       if (newCategory !== oldCategory) {
         if (oldCategory) {
           const [oldTax] = oldCategory.split(":");
@@ -592,6 +613,20 @@ export function CashActivityForm({
         written.payeeName = newPayeeName;
       }
 
+      // What this opening of the form ended up filing the transaction under
+      // that it was not under before: a retry that puts back what was there
+      // has filed nothing.
+      const [filedTaxonomy, filedCategory] = (written.category ?? "").split(":");
+      saving.filed = {
+        category:
+          written.category && written.category !== openedCategory
+            ? { taxonomyId: filedTaxonomy, categoryId: filedCategory }
+            : undefined,
+        payeeChanged:
+          !!written.payeeName &&
+          !isSamePayee(written.payeeName, saving.openedPayeeName ?? savedPayeeName, payees),
+      };
+
       saving.createdId = null;
       return saved;
     },
@@ -599,6 +634,7 @@ export function CashActivityForm({
     // ends in another opening, which can be of another kind of entry.
     onMutate: () => ({
       owner: session.current,
+      editing: isEditing,
       savedMessage: isEditing
         ? t("spending:cashForm.activityUpdated")
         : intent === "expense"
@@ -607,10 +643,13 @@ export function CashActivityForm({
             ? t("spending:cashForm.incomeAdded")
             : t("spending:cashForm.activityCreated"),
     }),
-    onSuccess: (_saved, _values, { owner, savedMessage }) => {
+    onSuccess: (saved, _values, { owner, editing, savedMessage }) => {
       owner.unrefreshed = false;
       invalidateSaved();
       toast.success(savedMessage);
+      // A rule is offered for a transaction that was refiled, not for one
+      // just entered: there is nothing yet to say its like will come again.
+      if (editing) ruleSuggestions?.suggestAfterEdit([saved.id], owner.filed);
       // A form dismissed or opened again since is not this save's to close.
       if (owner === session.current) {
         owner.closedBySave = true;

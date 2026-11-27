@@ -231,6 +231,49 @@ describe("adapter command parity", () => {
     expect(await invoke("rerun_categorization_rules", { onlyUncategorized: true })).toBe(1);
   });
 
+  it("routes the rule explanation of the rule suggestion prompt", async () => {
+    const explanation = [{ activityId: "a1", bankText: "TESCO", categoryRule: null }];
+    const mock = stubFetch(explanation);
+    expect(await invoke("explain_activity_rules", { activityIds: ["a1"] })).toEqual(explanation);
+    expect(lastCall(mock)).toEqual({
+      url: "/api/v1/spending/rules/explain",
+      method: "POST",
+      body: JSON.stringify({ activityIds: ["a1"] }),
+    });
+  });
+
+  it("saves a rule without applying it only when asked to", async () => {
+    let mock = stubFetch({ id: "r1" });
+    await invoke("create_categorization_rule", { rule: { name: "Tesco" } });
+    expect(lastCall(mock)).toEqual({
+      url: "/api/v1/spending/rules",
+      method: "POST",
+      body: JSON.stringify({ name: "Tesco" }),
+    });
+    mock = stubFetch({ id: "r1" });
+    await invoke("update_categorization_rule", { id: "r1", patch: { name: "Tesco" } });
+    expect(lastCall(mock).url).toBe("/api/v1/spending/rules/r1");
+
+    mock = stubFetch({ id: "r1" });
+    await invoke("create_categorization_rule", { rule: { name: "Tesco" }, deferApply: true });
+    expect(lastCall(mock)).toEqual({
+      url: "/api/v1/spending/rules?deferApply=true",
+      method: "POST",
+      body: JSON.stringify({ name: "Tesco" }),
+    });
+    mock = stubFetch({ id: "r1" });
+    await invoke("update_categorization_rule", {
+      id: "r1",
+      patch: { name: "Tesco" },
+      deferApply: true,
+    });
+    expect(lastCall(mock)).toEqual({
+      url: "/api/v1/spending/rules/r1?deferApply=true",
+      method: "PUT",
+      body: JSON.stringify({ name: "Tesco" }),
+    });
+  });
+
   it("sends a rule run's scope and override only when given, to the run and its preview", async () => {
     const summary = { matched: 2, changedActivities: 1, keptManualActivities: 1 };
     const scope = { activityIds: ["a1", "a2"], overrideManual: true };
@@ -249,6 +292,13 @@ describe("adapter command parity", () => {
       const unscoped = stubFetch(summary);
       await invoke(command, { onlyUncategorized: true });
       expect(lastCall(unscoped).body).toBe(JSON.stringify({ onlyUncategorized: true }));
+
+      // Narrowed to what one rule contributes, as the rule suggestion asks.
+      const oneRule = stubFetch(summary);
+      await invoke(command, { onlyUncategorized: true, ruleIds: ["r1"] });
+      expect(lastCall(oneRule).body).toBe(
+        JSON.stringify({ onlyUncategorized: true, ruleIds: ["r1"] }),
+      );
     }
   });
 

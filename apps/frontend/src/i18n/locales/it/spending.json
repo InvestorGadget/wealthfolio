@@ -248,7 +248,8 @@
     "deleteConfirmMany_one": "Sei sicuro di voler eliminare {{count}} transazione?",
     "deleteConfirmMany_many": "Sei sicuro di voler eliminare {{count}} transazioni?",
     "deleteConfirmMany_other": "Sei sicuro di voler eliminare {{count}} transazioni?",
-    "convertToTransfer": "Converti in trasferimento..."
+    "convertToTransfer": "Converti in trasferimento...",
+    "createRule": "Crea regola"
   },
   "cashFlow": {
     "income": "Entrate",
@@ -1268,5 +1269,28 @@
     "saveCategoryFirst": "Salva prima la categoria, poi cambia il tipo o il conto.",
     "typeNotForAccount": "Questo tipo non è disponibile per questo conto.",
     "amountRequired": "L'importo è obbligatorio."
+  },
+  "ruleSuggestion": {
+    "title": "Fare sempre così per transazioni come questa?",
+    "descPayee": "Imposta {{target}} ogni volta che il beneficiario è {{payee}}.",
+    "descText": "Imposta {{target}} ogni volta che la descrizione della banca è «{{text}}».",
+    "descTextWithPayee": "Imposta {{target}} e il beneficiario {{payee}} ogni volta che la descrizione della banca è «{{text}}».",
+    "createRule": "Crea regola",
+    "updateTitle": "Una regola imposta {{target}}: aggiornarla?",
+    "updateDescription": "La regola «{{rule}}» classifica transazioni come questa in modo diverso dalla tua scelta.",
+    "updateRule": "Aggiorna regola",
+    "notToday": "Non oggi",
+    "mutePayee": "Non suggerire per {{payee}}",
+    "settingsHint": "Puoi disattivare i suggerimenti in Impostazioni › Controllo spese.",
+    "applyTitle_one": "Applicare a {{count}} transazione corrispondente senza categoria?",
+    "applyTitle_many": "Applicare a {{count}} transazioni corrispondenti senza categoria?",
+    "applyTitle_other": "Applicare a {{count}} transazioni corrispondenti senza categoria?",
+    "applyKept_one": "{{count}} transazione categorizzata a mano resta com'è.",
+    "applyKept_many": "{{count}} transazioni categorizzate a mano restano come sono.",
+    "applyKept_other": "{{count}} transazioni categorizzate a mano restano come sono.",
+    "applyKeepsManual": "Le transazioni categorizzate a mano restano come sono.",
+    "applyConfirm": "Applica",
+    "applyLater": "Non ora",
+    "unavailable": "Impossibile preparare una regola per questa transazione."
   }
 }

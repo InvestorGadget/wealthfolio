@@ -24,8 +24,8 @@ use wealthfolio_spending::cash_activities::{
     CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, CategorizationRunSummary, NewCategorizationRule, RuleRunScope,
-    UpdateCategorizationRule,
+    ActivityRuleExplanation, CategorizationRule, CategorizationRunSummary, NewCategorizationRule,
+    RuleRunScope, UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
@@ -321,25 +321,40 @@ async fn list_categorization_rules(
     Ok(Json(state.categorization_rules_service.list().await?))
 }
 
+/// `deferApply=true` saves a rule without the background categorize that
+/// follows a rule change: the caller asks the user first, then runs the rules
+/// itself. Left out, the rule is applied to uncategorized activities as ever.
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase", default)]
+struct RuleSaveQuery {
+    defer_apply: bool,
+}
+
 async fn create_categorization_rule(
     axum::Extension(state): axum::Extension<Arc<AppState>>,
+    Query(query): Query<RuleSaveQuery>,
     Json(payload): Json<NewCategorizationRule>,
 ) -> ApiResult<Json<CategorizationRule>> {
     let created = state.categorization_rules_service.create(payload).await?;
-    spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    if !query.defer_apply {
+        spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    }
     Ok(Json(created))
 }
 
 async fn update_categorization_rule(
     axum::Extension(state): axum::Extension<Arc<AppState>>,
     Path(id): Path<String>,
+    Query(query): Query<RuleSaveQuery>,
     Json(payload): Json<UpdateCategorizationRule>,
 ) -> ApiResult<Json<CategorizationRule>> {
     let updated = state
         .categorization_rules_service
         .update(&id, payload)
         .await?;
-    spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    if !query.defer_apply {
+        spawn_auto_categorize_for_opted_in_accounts(&state).await;
+    }
     Ok(Json(updated))
 }
 
@@ -432,6 +447,24 @@ async fn preview_categorization_rules_rerun(
         state
             .categorization_rules_service
             .preview_scoped(&settings.account_ids, body.only_uncategorized, &body.scope)
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplainRulesBody {
+    activity_ids: Vec<String>,
+}
+
+async fn explain_activity_rules(
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
+    Json(body): Json<ExplainRulesBody>,
+) -> ApiResult<Json<Vec<ActivityRuleExplanation>>> {
+    Ok(Json(
+        state
+            .categorization_rules_service
+            .explain_activities(&body.activity_ids)
             .await?,
     ))
 }
@@ -929,6 +962,7 @@ pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
             "/spending/rules/rerun/preview",
             post(preview_categorization_rules_rerun),
         )
+        .route("/spending/rules/explain", post(explain_activity_rules))
         .route("/spending/rule-presets", get(list_rule_presets))
         .route(
             "/spending/rule-presets/{preset_id}/import",
@@ -1023,6 +1057,7 @@ mod tests {
             RuleRunScope {
                 activity_ids: Some(vec!["a1".to_string(), "a2".to_string()]),
                 override_manual: true,
+                rule_ids: None,
             }
         );
 
@@ -1033,6 +1068,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(explicit_default.scope, RuleRunScope::default());
+        // One narrowed to some rules is a scope too.
+        let narrowed: RerunRulesBody =
+            serde_json::from_value(serde_json::json!({ "ruleIds": ["r1"] })).unwrap();
+        assert_ne!(narrowed.scope, RuleRunScope::default());
 
         // The override without a list is refused before anything runs.
         let unscoped: RerunRulesBody =

@@ -238,7 +238,8 @@
     "unlinkTransfer": "振替のリンクを解除",
     "linkTransfer": "振替をリンク...",
     "deleteConfirmMany_other": "{{count}}件の取引を削除してもよろしいですか?",
-    "convertToTransfer": "振替に変換..."
+    "convertToTransfer": "振替に変換...",
+    "createRule": "ルールを作成"
   },
   "cashFlow": {
     "income": "収入",
@@ -1193,5 +1194,26 @@
     "saveCategoryFirst": "先にカテゴリを保存してから、タイプまたは口座を変更してください。",
     "typeNotForAccount": "このタイプはこの口座では使用できません。",
     "amountRequired": "金額は必須です。"
+  },
+  "ruleSuggestion": {
+    "title": "同様の取引を今後もこのように処理しますか？",
+    "descPayee": "支払先が{{payee}}の場合は常に{{target}}を設定します。",
+    "descText": "銀行の摘要が「{{text}}」の場合は常に{{target}}を設定します。",
+    "descTextWithPayee": "銀行の摘要が「{{text}}」の場合は常に{{target}}と支払先{{payee}}を設定します。",
+    "createRule": "ルールを作成",
+    "updateTitle": "ルールが{{target}}を設定しています。更新しますか？",
+    "updateDescription": "ルール「{{rule}}」は、このような取引を選択内容とは異なる分類にします。",
+    "updateRule": "ルールを更新",
+    "notToday": "今日は表示しない",
+    "mutePayee": "{{payee}}には提案しない",
+    "settingsHint": "提案は「設定 › 支出管理」でオフにできます。",
+    "applyTitle_one": "一致する未分類の取引{{count}}件に適用しますか？",
+    "applyTitle_other": "一致する未分類の取引{{count}}件に適用しますか？",
+    "applyKept_one": "手動で分類した取引{{count}}件はそのまま維持されます。",
+    "applyKept_other": "手動で分類した取引{{count}}件はそのまま維持されます。",
+    "applyKeepsManual": "手動で分類した取引はそのまま維持されます。",
+    "applyConfirm": "適用",
+    "applyLater": "今はしない",
+    "unavailable": "この取引のルールを準備できませんでした。"
   }
 }

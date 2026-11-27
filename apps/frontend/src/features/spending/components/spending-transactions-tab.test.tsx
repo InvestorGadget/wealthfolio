@@ -100,6 +100,18 @@ const mocks = vi.hoisted(() => {
     saveActivities: vi.fn(),
     useMutation: vi.fn(),
     formProps: vi.fn(),
+    // What the tab hands its rows, bulk bar and rule suggestions.
+    rowProps: undefined as
+      | undefined
+      | { onAssignCategory: (activityId: string, taxonomyId: string, categoryId: string) => void },
+    bulkProps: undefined as
+      | undefined
+      | {
+          onCategorize: (taxonomyId: string, categoryId: string) => Promise<void>;
+          onSetPayee: (name: string) => Promise<void>;
+        },
+    suggestAfterEdit: vi.fn(),
+    setActivitiesPayee: vi.fn(),
   };
 });
 
@@ -235,7 +247,19 @@ vi.mock("./delete-transactions-dialog", () => ({ DeleteTransactionsDialog: () =>
 vi.mock("./transaction-card", () => ({ TransactionCard: () => null }));
 vi.mock("./selection-toolbar", () => ({ SelectionToolbar: () => null }));
 vi.mock("./split-transaction-sheet", () => ({ SplitTransactionSheet: () => null }));
-vi.mock("./transactions-bulk-bar", () => ({ TransactionsBulkBar: () => null }));
+vi.mock("./transactions-bulk-bar", () => ({
+  TransactionsBulkBar: (props: NonNullable<typeof mocks.bulkProps>) => {
+    mocks.bulkProps = props;
+    return null;
+  },
+}));
+vi.mock("./rule-suggestion-provider", () => ({
+  useRuleSuggestions: () => ({ suggestAfterEdit: mocks.suggestAfterEdit, createRuleFor: vi.fn() }),
+}));
+vi.mock("../lib/payee", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../lib/payee")>()),
+  setActivitiesPayee: mocks.setActivitiesPayee,
+}));
 vi.mock("./spending-activity-data-grid", () => ({
   SpendingActivityDataGrid: (props: NonNullable<typeof mocks.gridProps>) => {
     mocks.gridProps = props;
@@ -264,28 +288,32 @@ vi.mock("./transaction-row", async () => {
         row: { activity: { id: string } };
         onEdit: (row: unknown) => void;
         onToggleSelect: (id: string) => void;
+        onAssignCategory: (activityId: string, taxonomyId: string, categoryId: string) => void;
       },
       _ref: unknown,
-    ) => (
-      <tr>
-        <td>
-          <button
-            type="button"
-            data-testid={`edit-${props.row.activity.id}`}
-            onClick={() => props.onEdit(props.row)}
-          >
-            edit
-          </button>
-          <button
-            type="button"
-            data-testid={`select-${props.row.activity.id}`}
-            onClick={() => props.onToggleSelect(props.row.activity.id)}
-          >
-            select
-          </button>
-        </td>
-      </tr>
-    ),
+    ) => {
+      mocks.rowProps = props;
+      return (
+        <tr>
+          <td>
+            <button
+              type="button"
+              data-testid={`edit-${props.row.activity.id}`}
+              onClick={() => props.onEdit(props.row)}
+            >
+              edit
+            </button>
+            <button
+              type="button"
+              data-testid={`select-${props.row.activity.id}`}
+              onClick={() => props.onToggleSelect(props.row.activity.id)}
+            >
+              select
+            </button>
+          </td>
+        </tr>
+      );
+    },
   );
   TransactionRow.displayName = "TransactionRow";
   return { TransactionRow };
@@ -787,5 +815,129 @@ describe("SpendingTransactionsTab view switch", () => {
     // The mocked search has one page.
     act(() => mocks.gridProps?.onPageChange(3));
     await waitFor(() => expect(mocks.gridProps?.pageIndex).toBe(0));
+  });
+});
+
+describe("SpendingTransactionsTab rule suggestions", () => {
+  const SPENDING = "spending_categories";
+  const original = structuredClone(mocks.transferOut);
+  /** The one row on screen, as an expense filed under these. */
+  const fileRow = (assignments: { taxonomyId: string; categoryId: string }[]) =>
+    Object.assign(mocks.transferOut, {
+      activityType: "WITHDRAWAL",
+      cashFlowBucket: "spending",
+      assignments,
+    });
+
+  beforeEach(() => {
+    mocks.useMutation.mockReset().mockReturnValue(mocks.mutation);
+    mocks.mutation.mutate.mockReset();
+    mocks.mutation.mutateAsync.mockReset().mockResolvedValue([{}]);
+    mocks.suggestAfterEdit.mockReset();
+    mocks.setActivitiesPayee.mockReset().mockResolvedValue(undefined);
+    mocks.categories = [
+      { id: "cat_groceries", taxonomyId: SPENDING, name: "Groceries", parentId: null },
+      { id: "payee_tesco", taxonomyId: "payees", name: "Tesco", parentId: null },
+    ] as TaxonomyCategory[];
+    localStorage.clear();
+  });
+  afterEach(() => {
+    Object.assign(mocks.transferOut, structuredClone(original));
+    mocks.categories = [];
+  });
+
+  /** Picks a category on the row and lets its write succeed. */
+  const pickOnRow = (categoryId: string) => {
+    act(() => mocks.rowProps?.onAssignCategory("out-1", SPENDING, categoryId));
+    const [vars, options] = mocks.mutation.mutate.mock.calls.at(-1) as [
+      unknown,
+      { onSuccess: () => void },
+    ];
+    expect(vars).toEqual({ activityId: "out-1", taxonomyId: SPENDING, categoryId });
+    return options;
+  };
+
+  it("offers a rule once a category picked on a row is saved", async () => {
+    fileRow([]);
+    render(<SpendingTransactionsTab />);
+    await screen.findByTestId("select-out-1");
+
+    const options = pickOnRow("cat_groceries");
+    // Not before the write went through.
+    expect(mocks.suggestAfterEdit).not.toHaveBeenCalled();
+    options.onSuccess();
+    expect(mocks.suggestAfterEdit).toHaveBeenCalledWith(["out-1"], {
+      category: { taxonomyId: SPENDING, categoryId: "cat_groceries" },
+    });
+  });
+
+  it("offers nothing for picking the category the row already has", async () => {
+    fileRow([{ taxonomyId: SPENDING, categoryId: "cat_groceries" }]);
+    render(<SpendingTransactionsTab />);
+    await screen.findByTestId("select-out-1");
+
+    pickOnRow("cat_groceries").onSuccess();
+    expect(mocks.suggestAfterEdit).not.toHaveBeenCalled();
+  });
+
+  it("offers a rule for a bulk category only when it refiled a selected row", async () => {
+    fileRow([{ taxonomyId: SPENDING, categoryId: "cat_groceries" }]);
+    render(<SpendingTransactionsTab />);
+    fireEvent.click(await screen.findByTestId("select-out-1"));
+    await waitFor(() => expect(mocks.bulkProps).toBeDefined());
+
+    await act(() => mocks.bulkProps?.onCategorize(SPENDING, "cat_groceries"));
+    expect(mocks.mutation.mutateAsync).toHaveBeenCalledTimes(1);
+    expect(mocks.suggestAfterEdit).not.toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByTestId("select-out-1"));
+    await act(() => mocks.bulkProps?.onCategorize(SPENDING, "cat_dining"));
+    expect(mocks.suggestAfterEdit).toHaveBeenCalledWith(["out-1"], {
+      category: { taxonomyId: SPENDING, categoryId: "cat_dining" },
+    });
+  });
+
+  it("offers nothing when the bulk category write fails", async () => {
+    fileRow([]);
+    mocks.mutation.mutateAsync.mockRejectedValue(new Error("conflict"));
+    render(<SpendingTransactionsTab />);
+    fireEvent.click(await screen.findByTestId("select-out-1"));
+    await waitFor(() => expect(mocks.bulkProps).toBeDefined());
+
+    await act(() => mocks.bulkProps?.onCategorize(SPENDING, "cat_groceries"));
+    expect(mocks.suggestAfterEdit).not.toHaveBeenCalled();
+  });
+
+  it("offers a rule for a bulk payee only when it refiled a selected row", async () => {
+    fileRow([{ taxonomyId: "payees", categoryId: "payee_tesco" }]);
+    render(<SpendingTransactionsTab />);
+    fireEvent.click(await screen.findByTestId("select-out-1"));
+    await waitFor(() => expect(mocks.bulkProps).toBeDefined());
+
+    // Already under Tesco, whatever the casing typed.
+    await act(() => mocks.bulkProps?.onSetPayee(" tesco "));
+    expect(mocks.setActivitiesPayee).toHaveBeenCalledTimes(1);
+    expect(mocks.suggestAfterEdit).not.toHaveBeenCalled();
+
+    // Clearing the payee leaves nothing to make a rule of.
+    fireEvent.click(await screen.findByTestId("select-out-1"));
+    await act(() => mocks.bulkProps?.onSetPayee(""));
+    expect(mocks.suggestAfterEdit).not.toHaveBeenCalled();
+
+    // A payee that is new is a change.
+    fireEvent.click(await screen.findByTestId("select-out-1"));
+    await act(() => mocks.bulkProps?.onSetPayee("Asda"));
+    expect(mocks.suggestAfterEdit).toHaveBeenCalledWith(["out-1"], { payeeChanged: true });
+  });
+
+  it("offers nothing when the bulk payee write fails", async () => {
+    fileRow([]);
+    mocks.setActivitiesPayee.mockRejectedValue(new Error("offline"));
+    render(<SpendingTransactionsTab />);
+    fireEvent.click(await screen.findByTestId("select-out-1"));
+    await waitFor(() => expect(mocks.bulkProps).toBeDefined());
+
+    await act(() => mocks.bulkProps?.onSetPayee("Asda"));
+    expect(mocks.suggestAfterEdit).not.toHaveBeenCalled();
   });
 });

@@ -1319,6 +1319,12 @@
       "recategorize_confirm_desc": "Isso executará novamente todas as regras sobre cada atividade das suas contas de gasto e pode sobrescrever as atribuições autocategorizadas existentes. As categorizações manuais são mantidas.",
       "payee_filter": "Regras do beneficiário: {{name}}",
       "payee_filter_clear": "Mostrar todas as regras"
+    },
+    "rule_suggestions": {
+      "title": "Sugerir regras depois que eu categorizar",
+      "description": "Depois de definir manualmente uma categoria ou um beneficiário, é oferecido transformar isso em uma regra. Nada é criado sem a sua confirmação. Esta escolha fica salva neste dispositivo.",
+      "held": "As sugestões estão em pausa por hoje ou silenciadas para alguns beneficiários.",
+      "resume": "Voltar a sugerir"
     }
   },
   "addons_updates_critical_one": "({{count}} crítica)",

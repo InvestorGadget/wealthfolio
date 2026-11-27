@@ -15,6 +15,7 @@ import {
   type RuleFormValues,
 } from "./rule-form";
 import type { RuleDraft } from "../lib/payee-rules";
+import type { RulePrefill } from "../lib/rule-suggestion";
 import type { CategorizationRule } from "../types/rule";
 
 interface RuleEditModalProps {
@@ -23,6 +24,8 @@ interface RuleEditModalProps {
   rule?: CategorizationRule;
   /** What a new rule starts from. Ignored when editing `rule`. */
   draft?: RuleDraft;
+  /** What a new rule's form opens with. */
+  prefill?: RulePrefill;
   categoryOptions: RuleFormCategoryOption[];
   accountOptions: RuleFormAccountOption[];
   onSave: (values: RuleFormValues) => void;
@@ -34,6 +37,7 @@ export function RuleEditModal({
   onClose,
   rule,
   draft,
+  prefill,
   categoryOptions,
   accountOptions,
   onSave,
@@ -52,6 +56,7 @@ export function RuleEditModal({
         <RuleForm
           rule={rule}
           draft={draft}
+          prefill={prefill}
           categoryOptions={categoryOptions}
           accountOptions={accountOptions}
           onSubmit={onSave}

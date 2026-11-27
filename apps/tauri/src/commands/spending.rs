@@ -19,8 +19,9 @@ use wealthfolio_spending::cash_activities::{
     CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, CategorizationRunSummary, ImportPresetResult, NewCategorizationRule,
-    RemovePresetResult, RulePresetSummary, RuleRunScope, UpdateCategorizationRule,
+    ActivityRuleExplanation, CategorizationRule, CategorizationRunSummary, ImportPresetResult,
+    NewCategorizationRule, RemovePresetResult, RulePresetSummary, RuleRunScope,
+    UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
@@ -330,9 +331,13 @@ pub async fn list_categorization_rules(
         .map_err(|e| format!("Failed to list rules: {}", e))
 }
 
+/// `defer_apply` saves the rule without the background categorize that
+/// follows a rule change: the caller asks the user first, then runs the rules
+/// itself. Left out, the rule is applied to uncategorized activities as ever.
 #[tauri::command]
 pub async fn create_categorization_rule(
     rule: NewCategorizationRule,
+    defer_apply: Option<bool>,
     state: ProfileAccess,
 ) -> Result<CategorizationRule, String> {
     let context = state.context()?;
@@ -341,7 +346,9 @@ pub async fn create_categorization_rule(
         .create(rule)
         .await
         .map_err(|e| format!("Failed to create rule: {}", e))?;
-    spawn_auto_categorize_for_opted_in_accounts(&context).await;
+    if !defer_apply.unwrap_or(false) {
+        spawn_auto_categorize_for_opted_in_accounts(&context).await;
+    }
     Ok(created)
 }
 
@@ -349,6 +356,7 @@ pub async fn create_categorization_rule(
 pub async fn update_categorization_rule(
     id: String,
     patch: UpdateCategorizationRule,
+    defer_apply: Option<bool>,
     state: ProfileAccess,
 ) -> Result<CategorizationRule, String> {
     let context = state.context()?;
@@ -357,7 +365,9 @@ pub async fn update_categorization_rule(
         .update(&id, patch)
         .await
         .map_err(|e| format!("Failed to update rule: {}", e))?;
-    spawn_auto_categorize_for_opted_in_accounts(&context).await;
+    if !defer_apply.unwrap_or(false) {
+        spawn_auto_categorize_for_opted_in_accounts(&context).await;
+    }
     Ok(updated)
 }
 
@@ -395,11 +405,12 @@ pub async fn rerun_categorization_rules(
     only_uncategorized: bool,
     activity_ids: Option<Vec<String>>,
     override_manual: Option<bool>,
+    rule_ids: Option<Vec<String>>,
     state: ProfileAccess,
 ) -> Result<usize, String> {
     // This command runs on every Spending account. A call that asks for a
     // scope is refused, not run unscoped.
-    if activity_ids.is_some() || override_manual == Some(true) {
+    if activity_ids.is_some() || override_manual == Some(true) || rule_ids.is_some() {
         return Err("This command does not take a scope; use the detailed rerun".to_string());
     }
     let context = state.context()?;
@@ -426,12 +437,14 @@ pub async fn rerun_categorization_rules_detailed(
     only_uncategorized: bool,
     activity_ids: Option<Vec<String>>,
     override_manual: Option<bool>,
+    rule_ids: Option<Vec<String>>,
     state: ProfileAccess,
 ) -> Result<CategorizationRunSummary, String> {
     let context = state.context()?;
     let scope = RuleRunScope {
         activity_ids,
         override_manual: override_manual.unwrap_or(false),
+        rule_ids,
     };
     let settings = context
         .spending_settings_service()
@@ -452,17 +465,21 @@ pub async fn rerun_categorization_rules_detailed(
 }
 
 /// What `rerun_categorization_rules_detailed` would do, without writing.
+/// With `rule_ids`, what those rules alone would: the summary's activity
+/// counts then say how many transactions they fill and how many they leave.
 #[tauri::command]
 pub async fn preview_categorization_rules_rerun(
     only_uncategorized: bool,
     activity_ids: Option<Vec<String>>,
     override_manual: Option<bool>,
+    rule_ids: Option<Vec<String>>,
     state: ProfileAccess,
 ) -> Result<CategorizationRunSummary, String> {
     let context = state.context()?;
     let scope = RuleRunScope {
         activity_ids,
         override_manual: override_manual.unwrap_or(false),
+        rule_ids,
     };
     let settings = context
         .spending_settings_service()
@@ -480,6 +497,20 @@ pub async fn preview_categorization_rules_rerun(
         .preview_scoped(&settings.account_ids, only_uncategorized, &scope)
         .await
         .map_err(|e| format!("Failed to preview rules: {}", e))
+}
+
+/// The rules that apply to these activities. Read-only.
+#[tauri::command]
+pub async fn explain_activity_rules(
+    activity_ids: Vec<String>,
+    state: ProfileAccess,
+) -> Result<Vec<ActivityRuleExplanation>, String> {
+    state
+        .context()?
+        .categorization_rules_service()
+        .explain_activities(&activity_ids)
+        .await
+        .map_err(|e| format!("Failed to explain rules: {}", e))
 }
 
 #[tauri::command]

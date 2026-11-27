@@ -73,6 +73,7 @@ import {
 import { toRowVM, type TransactionRowVM } from "../lib/transactions-helpers";
 import type { CashActivity } from "../types/cash-activity";
 import { flattenTaxonomy } from "./quick-categorize-popover";
+import { useRuleSuggestions } from "./rule-suggestion-provider";
 import { TransactionRowActions } from "./transaction-row-actions";
 
 const COLUMN_VISIBILITY_KEY = "spending-datagrid-column-visibility";
@@ -790,6 +791,7 @@ export function SpendingActivityDataGrid({
 
   // --- Save ----------------------------------------------------------------
   const bulkAssignCategories = useBulkAssignCategories();
+  const ruleSuggestions = useRuleSuggestions();
   const [isWritingCategories, setIsWritingCategories] = useState(false);
 
   const preparePayload = useCallback(
@@ -809,6 +811,23 @@ export function SpendingActivityDataGrid({
           try {
             // One batch: the server applies all of it or none.
             await bulkAssignCategories.mutateAsync(writes.assign);
+            // A rule is offered for rows that were refiled, when they were all
+            // given the same category: not for rows the grid has just created.
+            const created = new Set(outcome.createdIds.values());
+            const refiled = writes.assign.filter((item) => !created.has(item.activityId));
+            const [first] = refiled;
+            if (
+              first &&
+              refiled.every(
+                (item) =>
+                  item.taxonomyId === first.taxonomyId && item.categoryId === first.categoryId,
+              )
+            ) {
+              ruleSuggestions?.suggestAfterEdit(
+                refiled.map((item) => item.activityId),
+                { category: { taxonomyId: first.taxonomyId, categoryId: first.categoryId } },
+              );
+            }
           } catch {
             // The mutation reports the failure.
             writes.assign.forEach((item) => unsaved.add(item.activityId));
@@ -839,7 +858,15 @@ export function SpendingActivityDataGrid({
         setIsWritingCategories(false);
       }
     },
-    [accountTypeOf, bulkAssignCategories, dirtyTransactionIds, queryClient, rows, t],
+    [
+      accountTypeOf,
+      bulkAssignCategories,
+      dirtyTransactionIds,
+      queryClient,
+      rows,
+      ruleSuggestions,
+      t,
+    ],
   );
 
   const { saveActivities, isSaving } = useSaveActivities<SpendingGridRow>({

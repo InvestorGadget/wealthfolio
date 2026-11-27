@@ -254,6 +254,7 @@ export const COMMANDS: CommandMap = {
   rerun_categorization_rules: { method: "POST", path: "/spending/rules/rerun" },
   rerun_categorization_rules_detailed: { method: "POST", path: "/spending/rules/rerun/detailed" },
   preview_categorization_rules_rerun: { method: "POST", path: "/spending/rules/rerun/preview" },
+  explain_activity_rules: { method: "POST", path: "/spending/rules/explain" },
   list_rule_presets: { method: "GET", path: "/spending/rule-presets" },
   import_rule_preset: { method: "POST", path: "/spending/rule-presets" },
   remove_rule_preset: { method: "DELETE", path: "/spending/rule-presets" },
@@ -1556,13 +1557,22 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "list_rule_presets":
       break;
     case "create_categorization_rule": {
-      const { rule } = payload as { rule: Record<string, unknown> };
+      const { rule, deferApply } = payload as {
+        rule: Record<string, unknown>;
+        deferApply?: boolean;
+      };
+      if (deferApply) url += "?deferApply=true";
       body = JSON.stringify(rule);
       break;
     }
     case "update_categorization_rule": {
-      const { id, patch } = payload as { id: string; patch: Record<string, unknown> };
+      const { id, patch, deferApply } = payload as {
+        id: string;
+        patch: Record<string, unknown>;
+        deferApply?: boolean;
+      };
       url += `/${encodeURIComponent(id)}`;
+      if (deferApply) url += "?deferApply=true";
       body = JSON.stringify(patch);
       break;
     }
@@ -1585,12 +1595,18 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
     case "preview_categorization_rules_rerun": {
       // Without a scope the body is what it always was; `undefined` keys are
       // dropped by JSON.stringify.
-      const { onlyUncategorized, activityIds, overrideManual } = payload as {
+      const { onlyUncategorized, activityIds, overrideManual, ruleIds } = payload as {
         onlyUncategorized: boolean;
         activityIds?: string[];
         overrideManual?: boolean;
+        ruleIds?: string[];
       };
-      body = JSON.stringify({ onlyUncategorized, activityIds, overrideManual });
+      body = JSON.stringify({ onlyUncategorized, activityIds, overrideManual, ruleIds });
+      break;
+    }
+    case "explain_activity_rules": {
+      const { activityIds } = payload as { activityIds: string[] };
+      body = JSON.stringify({ activityIds });
       break;
     }
     case "import_rule_preset": {

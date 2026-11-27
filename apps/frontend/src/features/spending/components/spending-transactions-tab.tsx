@@ -76,6 +76,7 @@ import { SelectionToolbar } from "./selection-toolbar";
 import { flattenDayGroups } from "@/lib/day-groups";
 import { TransactionDayHeader, TransactionDayHeading } from "./transaction-day-header";
 import { TransactionRow } from "./transaction-row";
+import { useRuleSuggestions } from "./rule-suggestion-provider";
 import { SpendingActivityDataGrid } from "./spending-activity-data-grid";
 import { SplitTransactionSheet } from "./split-transaction-sheet";
 import { RunRulesDialog } from "./run-rules-dialog";
@@ -111,7 +112,13 @@ import {
   useUnassignActivityCategory,
 } from "../hooks/use-cash-activities";
 import { useEventTypes, useSpendingEvents } from "../hooks/use-spending-events";
-import { NO_PAYEE_ID, PAYEES_TAXONOMY_ID, payeeIdOf, setActivitiesPayee } from "../lib/payee";
+import {
+  findPayee,
+  NO_PAYEE_ID,
+  PAYEES_TAXONOMY_ID,
+  payeeIdOf,
+  setActivitiesPayee,
+} from "../lib/payee";
 import { useSpendingSettings } from "../hooks/use-spending-settings";
 import { invalidateSpendingCaches } from "../lib/invalidation";
 import type {
@@ -443,6 +450,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
     const income = useTaxonomy(INCOME_TAXONOMY);
     const savings = useTaxonomy(SAVINGS_TAXONOMY);
     const payees = useTaxonomy(PAYEES_TAXONOMY_ID);
+    const ruleSuggestions = useRuleSuggestions();
     const assignMutation = useAssignActivityCategory();
     const bulkAssignMutation = useBulkAssignCategories();
     const unassignMutation = useUnassignActivityCategory();
@@ -789,27 +797,43 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
           toast.error(t("spending:split.categoryProtected"));
           return;
         }
+        const categoryChanged = rows.some(
+          (row) => selectedRowIds.has(row.activity.id) && row.category?.id !== categoryId,
+        );
         try {
           const result = await bulkAssignMutation.mutateAsync(
             ids.map((activityId) => ({ activityId, taxonomyId, categoryId })),
           );
           toast.success(t("spending:txTab.categorizedCount", { count: result.length }));
           setSelectedRowIds(new Set());
+          // Only when it filed something anew: setting what is set is no edit.
+          if (categoryChanged) {
+            ruleSuggestions?.suggestAfterEdit(ids, { category: { taxonomyId, categoryId } });
+          }
         } catch {
           // Hook already toasts on error.
         }
         // Keep the selection on conflict so the user can review a corrected batch.
       },
-      [selectedRowIds, rows, bulkAssignMutation, t],
+      [selectedRowIds, rows, bulkAssignMutation, ruleSuggestions, t],
     );
 
     /** Files the rows under the payee called `name`, creating it if it is new. */
     const setPayeeOn = useCallback(
       async (ids: string[], name: string) => {
+        // Whether any of them is not filed under that payee yet. A payee that
+        // is new, or a row not on screen, counts as a change.
+        const payee = findPayee(payees.data?.categories ?? [], name);
+        const onFile = new Map(
+          [...items, ...gridPage.items].map((item) => [item.id, payeeIdOf(item.assignments)]),
+        );
+        const payeeChanged =
+          !!name.trim() && (!payee || ids.some((id) => onFile.get(id) !== payee.id));
         try {
           await setActivitiesPayee(ids, name, payees.data?.categories ?? []);
           toast.success(t("spending:txTab.taggedCount", { count: ids.length }));
           setSelectedRowIds(new Set());
+          if (payeeChanged) ruleSuggestions?.suggestAfterEdit(ids, { payeeChanged: true });
         } catch {
           toast.error(t("ai:categorization.failedApply"));
         } finally {
@@ -818,7 +842,7 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
           invalidateSpendingCaches(qc);
         }
       },
-      [payees.data?.categories, qc, t],
+      [gridPage.items, items, payees.data?.categories, qc, ruleSuggestions, t],
     );
     const handleBulkSetPayee = useCallback(
       (name: string) => setPayeeOn(Array.from(selectedRowIds), name),
@@ -857,9 +881,21 @@ export const SpendingTransactionsTab = forwardRef<SpendingTransactionsTabHandle>
 
     const handleAssignCategory = useCallback(
       (activityId: string, taxonomyId: string, categoryId: string) => {
-        assignMutation.mutate({ activityId, taxonomyId, categoryId });
+        const previous = rows.find((row) => row.activity.id === activityId)?.category?.id;
+        assignMutation.mutate(
+          { activityId, taxonomyId, categoryId },
+          {
+            onSuccess: () => {
+              // Picking the category it already has is not an edit.
+              if (previous === categoryId) return;
+              ruleSuggestions?.suggestAfterEdit([activityId], {
+                category: { taxonomyId, categoryId },
+              });
+            },
+          },
+        );
       },
-      [assignMutation],
+      [assignMutation, rows, ruleSuggestions],
     );
     const handleClearCategory = useCallback(
       (activityId: string, taxonomyId: string) => {

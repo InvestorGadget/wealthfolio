@@ -21,10 +21,15 @@ export interface CategorizationRunSummary {
   replacedManualActivities: number;
 }
 
-/** Narrows a rule run to some transactions. */
+/** Narrows a rule run to some transactions, or to what some rules contribute. */
 export interface CategorizationRunScope {
   /** Run on these transactions only. */
-  activityIds: string[];
+  activityIds?: string[];
+  /**
+   * Keep only what these rules win. The summary's transaction counts are then
+   * theirs alone: what they would fill, and what they leave as filed by hand.
+   */
+  ruleIds?: string[];
   /**
    * Also replace categories and payees set by hand, where a rule matches. The
    * server refuses it for a run that lists no transactions, and for an
@@ -130,4 +135,27 @@ export interface RemovePresetResult {
   presetId: string;
   removed: number;
   keptModified: number;
+}
+
+/** A rule that applies to a transaction, and what it sets there. */
+export interface AppliedRule {
+  rule: CategorizationRule;
+  taxonomyId: string;
+  categoryId: string;
+}
+
+/**
+ * What a full rule run makes of one transaction, whatever is on file for it.
+ * Mirrors `ActivityRuleExplanation` in `wealthfolio_spending`.
+ */
+export interface ActivityRuleExplanation {
+  activityId: string;
+  /** The text rules match: the bank's description, else the notes. */
+  bankText?: string | null;
+  /** The payee the transaction is filed under now. */
+  payeeId?: string | null;
+  /** The rule a run takes the transaction's payee from. */
+  payeeRule?: AppliedRule | null;
+  /** The rule a run takes the transaction's category from. */
+  categoryRule?: AppliedRule | null;
 }

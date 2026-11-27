@@ -1319,6 +1319,12 @@
       "recategorize_confirm_desc": "Questo rieseguirà tutte le regole su ogni movimento dei tuoi conti di spesa e potrebbe sovrascrivere le assegnazioni auto-categorizzate esistenti. Le categorizzazioni manuali vengono conservate.",
       "payee_filter": "Regole per il beneficiario: {{name}}",
       "payee_filter_clear": "Mostra tutte le regole"
+    },
+    "rule_suggestions": {
+      "title": "Suggerisci regole dopo che ho categorizzato",
+      "description": "Dopo aver impostato a mano una categoria o un beneficiario, viene proposto di farne una regola. Nulla viene creato senza la tua conferma. Questa scelta resta su questo dispositivo.",
+      "held": "I suggerimenti sono in pausa per oggi o disattivati per alcuni beneficiari.",
+      "resume": "Suggerisci di nuovo"
     }
   },
   "addons_updates_critical_one": "({{count}} critico)",

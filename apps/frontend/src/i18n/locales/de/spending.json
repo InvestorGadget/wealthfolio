@@ -239,7 +239,8 @@
     "linkTransfer": "Überweisung verknüpfen...",
     "deleteConfirmMany_one": "Möchten Sie wirklich {{count}} Transaktion löschen?",
     "deleteConfirmMany_other": "Möchten Sie wirklich {{count}} Transaktionen löschen?",
-    "convertToTransfer": "In Überweisung umwandeln..."
+    "convertToTransfer": "In Überweisung umwandeln...",
+    "createRule": "Regel erstellen"
   },
   "cashFlow": {
     "income": "Einnahmen",
@@ -1205,5 +1206,26 @@
     "saveCategoryFirst": "Speichern Sie zuerst die Kategorie und ändern Sie dann Typ oder Konto.",
     "typeNotForAccount": "Dieser Typ ist für dieses Konto nicht verfügbar.",
     "amountRequired": "Ein Betrag ist erforderlich."
+  },
+  "ruleSuggestion": {
+    "title": "Bei solchen Transaktionen immer so vorgehen?",
+    "descPayee": "{{target}} setzen, wenn der Zahlungsempfänger {{payee}} ist.",
+    "descText": "{{target}} setzen, wenn die Bankbeschreibung „{{text}}“ lautet.",
+    "descTextWithPayee": "{{target}} und den Zahlungsempfänger {{payee}} setzen, wenn die Bankbeschreibung „{{text}}“ lautet.",
+    "createRule": "Regel erstellen",
+    "updateTitle": "Eine Regel setzt {{target}} – aktualisieren?",
+    "updateDescription": "Die Regel „{{rule}}“ ordnet solche Transaktionen anders zu, als Sie gewählt haben.",
+    "updateRule": "Regel aktualisieren",
+    "notToday": "Heute nicht",
+    "mutePayee": "Für {{payee}} nicht vorschlagen",
+    "settingsHint": "Vorschläge lassen sich unter Einstellungen › Ausgaben-Tracker abschalten.",
+    "applyTitle_one": "Auf {{count}} passende Transaktion ohne Kategorie anwenden?",
+    "applyTitle_other": "Auf {{count}} passende Transaktionen ohne Kategorie anwenden?",
+    "applyKept_one": "{{count}} von Hand kategorisierte Transaktion bleibt unverändert.",
+    "applyKept_other": "{{count}} von Hand kategorisierte Transaktionen bleiben unverändert.",
+    "applyKeepsManual": "Von Hand kategorisierte Transaktionen bleiben unverändert.",
+    "applyConfirm": "Anwenden",
+    "applyLater": "Jetzt nicht",
+    "unavailable": "Für diese Transaktion konnte keine Regel vorbereitet werden."
   }
 }
