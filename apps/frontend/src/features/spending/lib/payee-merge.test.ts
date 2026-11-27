@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { deleteCategory } from "@/adapters";
 
-import { movePayeeActivities } from "../adapters/cash-activities";
+import { movePayeeActivities, searchCashActivities } from "../adapters/cash-activities";
 import { listCategorizationRules, updateCategorizationRule } from "../adapters/rules";
 import { mergePayee } from "./payee-merge";
 
 vi.mock("@/adapters", () => ({ deleteCategory: vi.fn(() => Promise.resolve()) }));
 vi.mock("../adapters/cash-activities", () => ({
   movePayeeActivities: vi.fn(() => Promise.resolve(3)),
+  searchCashActivities: vi.fn(),
 }));
 vi.mock("../adapters/rules", () => ({
   listCategorizationRules: vi.fn(),
@@ -20,6 +21,7 @@ const rule = (id: string, taxonomyId: string, categoryId: string, payees: object
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(searchCashActivities).mockResolvedValue({ items: [], totalCount: 0 } as never);
   vi.mocked(listCategorizationRules).mockResolvedValue([
     rule("r-old", "payees", "old"),
     rule("r-other-payee", "payees", "other"),
@@ -73,6 +75,43 @@ describe("mergePayee", () => {
       ["r-also-sets", { setPayeeId: "new" }],
       ["r-target", { categoryId: "new" }],
     ]);
+    expect(deleteCategory).toHaveBeenCalledWith("payees", "old");
+  });
+
+  it("reads the payee's bank texts before its transactions move", async () => {
+    const steps: string[] = [];
+    vi.mocked(searchCashActivities).mockImplementationOnce(async () => {
+      steps.push("texts");
+      return {
+        items: [
+          { importedDescription: "OLD SHOP 0042", notes: "lunch" },
+          { notes: "old shop 0042" },
+          { notes: "SQ *OLD SHOP" },
+        ],
+        totalCount: 3,
+      } as never;
+    });
+    vi.mocked(movePayeeActivities).mockImplementationOnce(async () => {
+      steps.push("move");
+      return 3;
+    });
+
+    const bankTexts = await mergePayee("old", "new");
+
+    // Once moved, nothing tells them from the destination's own transactions.
+    expect(steps).toEqual(["texts", "move"]);
+    expect(searchCashActivities).toHaveBeenCalledWith(
+      expect.objectContaining({ payeeIds: ["old"] }),
+    );
+    expect(bankTexts).toEqual({ texts: ["OLD SHOP 0042", "SQ *OLD SHOP"], distinct: 2 });
+  });
+
+  it("still merges when the bank texts cannot be read, and then reports none", async () => {
+    vi.mocked(searchCashActivities).mockRejectedValueOnce(new Error("offline"));
+
+    expect(await mergePayee("old", "new")).toEqual({ texts: [], distinct: 0 });
+
+    expect(movePayeeActivities).toHaveBeenCalledWith("old", "new");
     expect(deleteCategory).toHaveBeenCalledWith("payees", "old");
   });
 

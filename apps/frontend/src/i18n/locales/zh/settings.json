@@ -1154,7 +1154,16 @@
       "merge_confirm": "合并并删除",
       "merged": "已将“{{name}}”合并到“{{destination}}”",
       "deleted": "已删除“{{name}}”",
-      "delete_error": "无法删除收款方。已移动的内容会保留，请重试。"
+      "delete_error": "无法删除收款方。已移动的内容会保留，请重试。",
+      "rules_count_one": "{{count}} 条规则",
+      "rules_count_other": "{{count}} 条规则",
+      "rules_for": "{{name}} 的规则：{{count}}",
+      "create_rule": "创建规则",
+      "create_rule_for": "为 {{name}} 创建规则",
+      "merge_rule_title": "今后类似“{{name}}”的交易也归入“{{destination}}”吗？",
+      "merge_rule_description": "当新交易的银行摘要是“{{name}}”的交易曾有的摘要之一时，规则可将其归入“{{destination}}”（银行摘要：{{count}}）。保存前您可以检查该规则。",
+      "merge_rule_capped": "规则中只能包含 {{total}} 个银行摘要中最常见的 {{count}} 个。",
+      "merge_rule_skip": "暂不"
     },
     "categories": {
       "heading": "类别",
@@ -1248,7 +1257,9 @@
       "no_match_filter": "没有规则匹配当前筛选条件。",
       "clear_filters": "清除筛选",
       "recategorize_confirm_title": "重新分类所有活动？",
-      "recategorize_confirm_desc": "这将对您支出账户中的每项活动重新运行所有规则，可能会覆盖现有的自动分类分配。手动分类会被保留。"
+      "recategorize_confirm_desc": "这将对您支出账户中的每项活动重新运行所有规则，可能会覆盖现有的自动分类分配。手动分类会被保留。",
+      "payee_filter": "收款方的规则：{{name}}",
+      "payee_filter_clear": "显示所有规则"
     }
   },
   "addons_updates_critical_one": "（{{count}} 项关键）",

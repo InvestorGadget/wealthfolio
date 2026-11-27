@@ -1,7 +1,7 @@
 import { getCategoryLabel } from "@/lib/taxonomy-labels";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import {
   AlertDialog,
@@ -51,6 +51,12 @@ import {
 } from "@/features/spending/components/rule-form";
 import { isSpendingAccountType } from "@/features/spending/lib/constants";
 import { PAYEES_TAXONOMY_ID } from "@/features/spending/lib/payee";
+import {
+  ruleNamesPayee,
+  RULES_PAYEE_PARAM,
+  type RuleDraft,
+  type RulesPageState,
+} from "@/features/spending/lib/payee-rules";
 import { hasTextCondition, parseAnyOfPattern } from "@/features/spending/lib/rule-conditions";
 import {
   useCategorizationRuleMutations,
@@ -85,8 +91,36 @@ export default function SpendingRulesPage() {
   const payees = useTaxonomy(PAYEES_TAXONOMY_ID);
   const { create, update, remove, rerun } = useCategorizationRuleMutations();
 
-  const [visibleModal, setVisibleModal] = useState(false);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // `?payee=<id>` narrows the list to the rules that name that payee.
+  const payeeFilter = searchParams.get(RULES_PAYEE_PARAM);
+  const clearPayeeFilter = () => {
+    setSearchParams(
+      (params) => {
+        const next = new URLSearchParams(params);
+        next.delete(RULES_PAYEE_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  // Another screen can open this one on a new rule it proposes (see
+  // `RulesPageState`): the form starts from that draft.
+  const [ruleDraft, setRuleDraft] = useState<RuleDraft | undefined>(
+    () => (location.state as RulesPageState | null)?.ruleDraft,
+  );
+  const [visibleModal, setVisibleModal] = useState(ruleDraft !== undefined);
   const [selectedRule, setSelectedRule] = useState<CategorizationRule | undefined>();
+  const closeModal = () => {
+    setVisibleModal(false);
+    if ((location.state as RulesPageState | null)?.ruleDraft) {
+      // Dropped from the history entry too, so coming back does not reopen it.
+      void navigate({ search: location.search }, { replace: true, state: null });
+    }
+  };
   const [searchQuery, setSearchQuery] = useState("");
   // `presetFilter`: null = all, presetId = installed preset, "custom" = user-created rules.
   const [presetFilter, setPresetFilter] = useState<string | null>(null);
@@ -188,6 +222,7 @@ export default function SpendingRulesPage() {
 
   const handleAddRule = () => {
     setSelectedRule(undefined);
+    setRuleDraft(undefined);
     setVisibleModal(true);
   };
 
@@ -244,7 +279,7 @@ export default function SpendingRulesPage() {
           accountId: values.accountId,
         });
       }
-      setVisibleModal(false);
+      closeModal();
     } catch {
       // The mutation reports the error; the modal stays open to try again.
     }
@@ -257,6 +292,7 @@ export default function SpendingRulesPage() {
     return [...rules]
       .sort((a, b) => b.priority - a.priority)
       .filter((rule) => {
+        if (payeeFilter && !ruleNamesPayee(rule, payeeFilter)) return false;
         if (presetFilter === "custom" && rule.presetId) return false;
         if (presetFilter && presetFilter !== "custom" && rule.presetId !== presetFilter)
           return false;
@@ -274,7 +310,7 @@ export default function SpendingRulesPage() {
           text.toLowerCase().includes(query),
         );
       });
-  }, [rules, searchQuery, presetFilter, categoryMeta]);
+  }, [rules, searchQuery, presetFilter, payeeFilter, categoryMeta]);
 
   const customRulesCount = useMemo(() => rules.filter((r) => !r.presetId).length, [rules]);
   const totalRulesCount = rules.length;
@@ -439,6 +475,22 @@ export default function SpendingRulesPage() {
               )}
             </div>
 
+            {payeeFilter && (
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">
+                  {t("settings:spending.rules.payee_filter", {
+                    name:
+                      categoryMeta[`${PAYEES_TAXONOMY_ID}:${payeeFilter}`]?.name ??
+                      t("spending:rules.unknownPayee"),
+                  })}
+                </span>
+                <Button variant="ghost" size="sm" className="h-6 px-2" onClick={clearPayeeFilter}>
+                  <Icons.Close className="me-1 h-3 w-3" aria-hidden="true" />
+                  {t("settings:spending.rules.payee_filter_clear")}
+                </Button>
+              </div>
+            )}
+
             {filteredRules.length === 0 ? (
               <div className="text-muted-foreground rounded-md border border-dashed py-8 text-center text-sm">
                 {searchQuery
@@ -450,6 +502,7 @@ export default function SpendingRulesPage() {
                   onClick={() => {
                     setSearchQuery("");
                     setPresetFilter(null);
+                    if (payeeFilter) clearPayeeFilter();
                   }}
                 >
                   {t("settings:spending.rules.clear_filters")}
@@ -477,8 +530,9 @@ export default function SpendingRulesPage() {
 
       <RuleEditModal
         open={visibleModal}
-        onClose={() => setVisibleModal(false)}
+        onClose={closeModal}
         rule={selectedRule}
+        draft={selectedRule ? undefined : ruleDraft}
         categoryOptions={categoryOptions}
         accountOptions={accountOptions}
         onSave={handleSave}

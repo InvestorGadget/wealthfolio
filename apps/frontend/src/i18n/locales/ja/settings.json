@@ -1154,7 +1154,16 @@
       "merge_confirm": "統合して削除",
       "merged": "「{{name}}」を「{{destination}}」に統合しました",
       "deleted": "「{{name}}」を削除しました",
-      "delete_error": "支払先を削除できませんでした。移動済みの分は保持されます。もう一度お試しください。"
+      "delete_error": "支払先を削除できませんでした。移動済みの分は保持されます。もう一度お試しください。",
+      "rules_count_one": "ルール{{count}}件",
+      "rules_count_other": "ルール{{count}}件",
+      "rules_for": "{{name}}のルール: {{count}}件",
+      "create_rule": "ルールを作成",
+      "create_rule_for": "{{name}}のルールを作成",
+      "merge_rule_title": "今後「{{name}}」と同様の取引も「{{destination}}」に分類しますか？",
+      "merge_rule_description": "銀行の摘要が「{{name}}」の取引にあったもののいずれかである新しい取引を、ルールで「{{destination}}」に分類できます（銀行の摘要: {{count}}件）。ルールは保存前に確認できます。",
+      "merge_rule_capped": "ルールに含められるのは、{{total}}件の銀行の摘要のうち頻度の高い{{count}}件のみです。",
+      "merge_rule_skip": "今はしない"
     },
     "categories": {
       "heading": "カテゴリ",
@@ -1248,7 +1257,9 @@
       "no_match_filter": "現在の絞り込み条件に一致するルールはありません。",
       "clear_filters": "絞り込みをクリア",
       "recategorize_confirm_title": "すべての取引を再分類しますか?",
-      "recategorize_confirm_desc": "支出管理の対象口座にあるすべての取引に対してルールを再実行します。自動分類された既存の設定は上書きされる場合があります。手動で設定した分類は保持されます。"
+      "recategorize_confirm_desc": "支出管理の対象口座にあるすべての取引に対してルールを再実行します。自動分類された既存の設定は上書きされる場合があります。手動で設定した分類は保持されます。",
+      "payee_filter": "支払先のルール: {{name}}",
+      "payee_filter_clear": "すべてのルールを表示"
     }
   },
   "addons_updates_critical_one": "(重要 {{count}}件)",

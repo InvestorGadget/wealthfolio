@@ -1203,7 +1203,17 @@
       "merge_confirm": "Unisci ed elimina",
       "merged": "«{{name}}» unito a «{{destination}}»",
       "deleted": "«{{name}}» eliminato",
-      "delete_error": "Impossibile eliminare il beneficiario. Quanto già spostato resta; riprova."
+      "delete_error": "Impossibile eliminare il beneficiario. Quanto già spostato resta; riprova.",
+      "rules_count_one": "{{count}} regola",
+      "rules_count_many": "{{count}} regole",
+      "rules_count_other": "{{count}} regole",
+      "rules_for": "Regole per {{name}}: {{count}}",
+      "create_rule": "Crea regola",
+      "create_rule_for": "Crea una regola per {{name}}",
+      "merge_rule_title": "Archiviare anche le transazioni future come quelle di «{{name}}» sotto «{{destination}}»?",
+      "merge_rule_description": "Una regola può archiviare le nuove transazioni sotto «{{destination}}» quando la loro descrizione della banca è una di quelle delle transazioni di «{{name}}» (descrizioni della banca: {{count}}). Potrai controllare la regola prima di salvarla.",
+      "merge_rule_capped": "Nella regola rientrano solo le {{count}} descrizioni della banca più frequenti su {{total}}.",
+      "merge_rule_skip": "Non ora"
     },
     "categories": {
       "heading": "Categorie",
@@ -1304,7 +1314,9 @@
       "no_match_filter": "Nessuna regola corrisponde al filtro attuale.",
       "clear_filters": "Cancella filtri",
       "recategorize_confirm_title": "Ricategorizzare tutti i movimenti?",
-      "recategorize_confirm_desc": "Questo rieseguirà tutte le regole su ogni movimento dei tuoi conti di spesa e potrebbe sovrascrivere le assegnazioni auto-categorizzate esistenti. Le categorizzazioni manuali vengono conservate."
+      "recategorize_confirm_desc": "Questo rieseguirà tutte le regole su ogni movimento dei tuoi conti di spesa e potrebbe sovrascrivere le assegnazioni auto-categorizzate esistenti. Le categorizzazioni manuali vengono conservate.",
+      "payee_filter": "Regole per il beneficiario: {{name}}",
+      "payee_filter_clear": "Mostra tutte le regole"
     }
   },
   "addons_updates_critical_one": "({{count}} critico)",

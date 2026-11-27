@@ -1156,7 +1156,16 @@
       "merge_confirm": "Zusammenführen und löschen",
       "merged": "„{{name}}“ mit „{{destination}}“ zusammengeführt",
       "deleted": "„{{name}}“ gelöscht",
-      "delete_error": "Der Zahlungsempfänger konnte nicht gelöscht werden. Bereits Verschobenes bleibt erhalten; versuchen Sie es erneut."
+      "delete_error": "Der Zahlungsempfänger konnte nicht gelöscht werden. Bereits Verschobenes bleibt erhalten; versuchen Sie es erneut.",
+      "rules_count_one": "{{count}} Regel",
+      "rules_count_other": "{{count}} Regeln",
+      "rules_for": "Regeln für {{name}}: {{count}}",
+      "create_rule": "Regel erstellen",
+      "create_rule_for": "Regel für {{name}} erstellen",
+      "merge_rule_title": "Künftige Transaktionen wie die von „{{name}}“ auch unter „{{destination}}“ ablegen?",
+      "merge_rule_description": "Eine Regel kann neue Transaktionen unter „{{destination}}“ ablegen, wenn ihre Bankbeschreibung eine derjenigen ist, die die Transaktionen von „{{name}}“ hatten (Bankbeschreibungen: {{count}}). Sie können die Regel vor dem Speichern prüfen.",
+      "merge_rule_capped": "Nur die {{count}} häufigsten von {{total}} Bankbeschreibungen passen in die Regel.",
+      "merge_rule_skip": "Nicht jetzt"
     },
     "categories": {
       "heading": "Kategorien",
@@ -1253,7 +1262,9 @@
       "no_match_filter": "Keine Regel entspricht dem aktuellen Filter.",
       "clear_filters": "Filter zurücksetzen",
       "recategorize_confirm_title": "Alle Aktivitäten neu kategorisieren?",
-      "recategorize_confirm_desc": "Dadurch werden alle Regeln erneut auf jede Aktivität in Ihren Ausgabenkonten angewendet und bestehende automatisch kategorisierte Zuordnungen können überschrieben werden. Manuelle Kategorisierungen bleiben erhalten."
+      "recategorize_confirm_desc": "Dadurch werden alle Regeln erneut auf jede Aktivität in Ihren Ausgabenkonten angewendet und bestehende automatisch kategorisierte Zuordnungen können überschrieben werden. Manuelle Kategorisierungen bleiben erhalten.",
+      "payee_filter": "Regeln für Zahlungsempfänger: {{name}}",
+      "payee_filter_clear": "Alle Regeln anzeigen"
     }
   },
   "privacy": "Datenschutz",

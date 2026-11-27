@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import {
@@ -34,8 +35,21 @@ import { invalidateSpendingCaches } from "../lib/invalidation";
 import { cn } from "@/lib/utils";
 
 import { getPayeeReferences, getPayeeUsage } from "../adapters/cash-activities";
+import { listCategorizationRules } from "../adapters/rules";
+import { useCategorizationRules } from "../hooks/use-categorization-rules";
 import { ensurePayee, findPayee, PAYEES_TAXONOMY_ID } from "../lib/payee";
 import { mergePayee } from "../lib/payee-merge";
+import {
+  countRulesByPayee,
+  mergeRuleDraft,
+  payeeConditionDraft,
+  payeeRuleCoversTexts,
+  RULES_PAGE_PATH,
+  rulesForPayeePath,
+  type BankTextSummary,
+  type RuleDraft,
+  type RulesPageState,
+} from "../lib/payee-rules";
 
 /** Query key of the per-payee transaction counts. */
 const PAYEE_USAGE_KEY = "payee-usage";
@@ -46,7 +60,7 @@ interface PayeeManagerProps {
 
 /**
  * The payees, by name, each with the number of transactions filed under it,
- * rename and delete. A payee still used by transactions or rules is not
+ * the rules that name it (or a way to create one), rename and delete. A payee still used by transactions or rules is not
  * deleted outright: it is merged into another one, which is also how two
  * spellings of the same payee are combined.
  */
@@ -58,6 +72,13 @@ export function PayeeManager({ payees }: PayeeManagerProps) {
   const sorted = useMemo(() => [...payees].sort((a, b) => a.name.localeCompare(b.name)), [payees]);
   // Counts are a convenience: the list is usable while they load or if they fail.
   const usage = useQuery({ queryKey: [PAYEE_USAGE_KEY], queryFn: getPayeeUsage });
+  // The rules that name each payee, counted from the rule list the rules page
+  // filters with the same test, so a count and the page it opens agree.
+  const rules = useCategorizationRules();
+  const ruleCounts = useMemo(() => countRulesByPayee(rules.data ?? []), [rules.data]);
+  const navigate = useNavigate();
+  const openNewRule = (ruleDraft: RuleDraft) =>
+    navigate(RULES_PAGE_PATH, { state: { ruleDraft } satisfies RulesPageState });
 
   return (
     <>
@@ -87,6 +108,31 @@ export function PayeeManager({ payees }: PayeeManagerProps) {
                 {usage.data[payee.id] ?? 0}
               </span>
             )}
+            {rules.data &&
+              ((ruleCounts.get(payee.id) ?? 0) > 0 ? (
+                <Link
+                  to={rulesForPayeePath(payee.id)}
+                  className="text-muted-foreground hover:text-foreground focus-visible:ring-ring rounded-sm text-xs tabular-nums underline-offset-2 hover:underline focus-visible:ring-2 focus-visible:outline-none"
+                  aria-label={t("settings:spending.payees.rules_for", {
+                    count: ruleCounts.get(payee.id) ?? 0,
+                    name: payee.name,
+                  })}
+                >
+                  {t("settings:spending.payees.rules_count", {
+                    count: ruleCounts.get(payee.id) ?? 0,
+                  })}
+                </Link>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground h-7 px-2 text-xs"
+                  aria-label={t("settings:spending.payees.create_rule_for", { name: payee.name })}
+                  onClick={() => void openNewRule(payeeConditionDraft(payee))}
+                >
+                  {t("settings:spending.payees.create_rule")}
+                </Button>
+              ))}
             <Button
               variant="ghost"
               size="icon"
@@ -123,6 +169,7 @@ export function PayeeManager({ payees }: PayeeManagerProps) {
           payee={deleting}
           others={sorted.filter((other) => other.id !== deleting.id)}
           onClose={() => setDeleting(undefined)}
+          onCreateRule={(ruleDraft) => void openNewRule(ruleDraft)}
         />
       )}
     </>
@@ -210,14 +257,35 @@ function PayeeNameDialog({ payee, payees, onClose }: PayeeNameDialogProps) {
   );
 }
 
+/**
+ * Whether a rule for the destination payee already lists every one of the
+ * texts. Read after the merge, which has moved the merged payee's own rules
+ * to the destination. Failing to read the rules leaves the offer standing.
+ */
+async function coveredByRule(destinationId: string, bankTexts: BankTextSummary): Promise<boolean> {
+  try {
+    return payeeRuleCoversTexts(await listCategorizationRules(), destinationId, bankTexts.texts);
+  } catch {
+    return false;
+  }
+}
+
 interface DeletePayeeDialogProps {
   payee: TaxonomyCategory;
   /** The payees it could be merged into. */
   others: TaxonomyCategory[];
   onClose: () => void;
+  /** Opens a new rule started from the draft a merge offers. */
+  onCreateRule: (draft: RuleDraft) => void;
 }
 
-function DeletePayeeDialog({ payee, others, onClose }: DeletePayeeDialogProps) {
+/** The rule a finished merge offers: the merged payee's bank texts, filed under the destination. */
+interface MergeRuleOffer {
+  destination: TaxonomyCategory;
+  bankTexts: BankTextSummary;
+}
+
+function DeletePayeeDialog({ payee, others, onClose, onCreateRule }: DeletePayeeDialogProps) {
   const { t } = useTranslation();
   const qc = useQueryClient();
   const [destinationId, setDestinationId] = useState<string>();
@@ -240,6 +308,7 @@ function DeletePayeeDialog({ payee, others, onClose }: DeletePayeeDialogProps) {
       invalidateSpendingCaches(qc);
     },
   });
+  const [offer, setOffer] = useState<MergeRuleOffer>();
   const pending = remove.isPending || merge.isPending;
   const used = !!usage.data && (usage.data.transactions > 0 || usage.data.rules > 0);
   const destination = others.find((other) => other.id === destinationId);
@@ -248,13 +317,20 @@ function DeletePayeeDialog({ payee, others, onClose }: DeletePayeeDialogProps) {
     try {
       if (used) {
         if (!destination) return;
-        await merge.mutateAsync(destination.id);
+        const bankTexts = await merge.mutateAsync(destination.id);
         toast.success(
           t("settings:spending.payees.merged", {
             name: payee.name,
             destination: destination.name,
           }),
         );
+        // New transactions with the merged payee's bank texts would still
+        // arrive without a payee. Offer a rule for them, unless there is
+        // nothing to list or a rule for the destination lists them already.
+        if (bankTexts.texts.length > 0 && !(await coveredByRule(destination.id, bankTexts))) {
+          setOffer({ destination, bankTexts });
+          return;
+        }
       } else {
         await remove.mutateAsync({ taxonomyId: PAYEES_TAXONOMY_ID, categoryId: payee.id });
         toast.success(t("settings:spending.payees.deleted", { name: payee.name }));
@@ -265,6 +341,49 @@ function DeletePayeeDialog({ payee, others, onClose }: DeletePayeeDialogProps) {
       void usage.refetch();
     }
   };
+
+  if (offer) {
+    const listed = offer.bankTexts.texts.length;
+    return (
+      <AlertDialog open onOpenChange={(open) => !open && onClose()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("settings:spending.payees.merge_rule_title", {
+                name: payee.name,
+                destination: offer.destination.name,
+              })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("settings:spending.payees.merge_rule_description", {
+                count: listed,
+                name: payee.name,
+                destination: offer.destination.name,
+              })}
+              {offer.bankTexts.distinct > listed &&
+                ` ${t("settings:spending.payees.merge_rule_capped", {
+                  count: listed,
+                  total: offer.bankTexts.distinct,
+                })}`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <Button variant="outline" onClick={onClose}>
+              {t("settings:spending.payees.merge_rule_skip")}
+            </Button>
+            <Button
+              onClick={() => {
+                onCreateRule(mergeRuleDraft(offer.bankTexts.texts, offer.destination));
+                onClose();
+              }}
+            >
+              {t("settings:spending.payees.create_rule")}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
 
   return (
     <AlertDialog open onOpenChange={(open) => !open && !pending && onClose()}>

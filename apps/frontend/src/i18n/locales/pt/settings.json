@@ -1203,7 +1203,17 @@
       "merge_confirm": "Juntar e eliminar",
       "merged": "«{{name}}» juntado a «{{destination}}»",
       "deleted": "«{{name}}» eliminado",
-      "delete_error": "Não foi possível eliminar o beneficiário. O que já foi movido mantém-se; tente novamente."
+      "delete_error": "Não foi possível eliminar o beneficiário. O que já foi movido mantém-se; tente novamente.",
+      "rules_count_one": "{{count}} regra",
+      "rules_count_many": "{{count}} regras",
+      "rules_count_other": "{{count}} regras",
+      "rules_for": "Regras de {{name}}: {{count}}",
+      "create_rule": "Criar regra",
+      "create_rule_for": "Criar uma regra para {{name}}",
+      "merge_rule_title": "Classificar também as transações futuras como as de «{{name}}» em «{{destination}}»?",
+      "merge_rule_description": "Uma regra pode classificar as novas transações em «{{destination}}» quando a descrição do banco for uma das que as transações de «{{name}}» tinham (descrições do banco: {{count}}). Pode rever a regra antes de a guardar.",
+      "merge_rule_capped": "Só cabem na regra as {{count}} descrições do banco mais frequentes de {{total}}.",
+      "merge_rule_skip": "Agora não"
     },
     "categories": {
       "heading": "Categorias",
@@ -1304,7 +1314,9 @@
       "no_match_filter": "Nenhuma regra corresponde ao filtro atual.",
       "clear_filters": "Limpar filtros",
       "recategorize_confirm_title": "Recategorizar todas as atividades?",
-      "recategorize_confirm_desc": "Isso executará novamente todas as regras sobre cada atividade das suas contas de gasto e pode sobrescrever as atribuições autocategorizadas existentes. As categorizações manuais são mantidas."
+      "recategorize_confirm_desc": "Isso executará novamente todas as regras sobre cada atividade das suas contas de gasto e pode sobrescrever as atribuições autocategorizadas existentes. As categorizações manuais são mantidas.",
+      "payee_filter": "Regras do beneficiário: {{name}}",
+      "payee_filter_clear": "Mostrar todas as regras"
     }
   },
   "addons_updates_critical_one": "({{count}} crítica)",
