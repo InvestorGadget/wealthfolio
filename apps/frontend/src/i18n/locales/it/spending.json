@@ -180,7 +180,37 @@
     "setPayeeNone": "Nessun beneficiario",
     "setPayeeHint": "Le transazioni corrispondenti vengono archiviate anche sotto questo beneficiario, a meno che tu non ne abbia scelto uno.",
     "setPayeeChip": "Imposta anche il beneficiario {{name}}",
-    "unknownPayee": "Beneficiario sconosciuto"
+    "unknownPayee": "Beneficiario sconosciuto",
+    "runSelected": {
+      "action": "Esegui regole",
+      "title": "Esegui le regole sulle transazioni selezionate",
+      "loading": "Verifica di ciò che le regole cambierebbero…",
+      "previewError": "Impossibile verificare ciò che le regole cambierebbero. Chiudi e riprova.",
+      "nothing": "Nessuna regola modifica queste transazioni.",
+      "willChange_one": "Le regole modificheranno {{count}} transazione.",
+      "willChange_many": "Le regole modificheranno {{count}} transazioni.",
+      "willChange_other": "Le regole modificheranno {{count}} transazioni.",
+      "keptManual_one": "{{count}} transazione impostata a mano viene conservata.",
+      "keptManual_many": "{{count}} transazioni impostate a mano vengono conservate.",
+      "keptManual_other": "{{count}} transazioni impostate a mano vengono conservate.",
+      "replacesManual_one": "{{count}} transazione impostata a mano viene sostituita.",
+      "replacesManual_many": "{{count}} transazioni impostate a mano vengono sostituite.",
+      "replacesManual_other": "{{count}} transazioni impostate a mano vengono sostituite.",
+      "apply": "Esegui regole",
+      "done_one": "Le regole hanno modificato {{count}} transazione.",
+      "done_many": "Le regole hanno modificato {{count}} transazioni.",
+      "done_other": "Le regole hanno modificato {{count}} transazioni.",
+      "doneKept": "Impostate a mano e conservate: {{count}}.",
+      "doneReplaced": "Impostate a mano e sostituite: {{count}}.",
+      "splitsKept": "Suddivisioni conservate: {{count}}.",
+      "error": "Impossibile eseguire le regole."
+    },
+    "override": {
+      "label": "Sostituisci anche le categorie e i beneficiari che ho impostato a mano ({{count}})",
+      "confirmTitle": "Sostituire ciò che hai impostato a mano?",
+      "confirmDescription": "Dove una regola corrisponde, sostituisce la categoria e il beneficiario che hai impostato a mano (transazioni interessate: {{count}}). L'operazione non può essere annullata.",
+      "confirm": "Sostituisci ed esegui"
+    }
   },
   "transactions": {
     "filterByPayee": "Mostra le transazioni di {{name}}",

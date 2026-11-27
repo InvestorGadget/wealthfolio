@@ -1127,7 +1127,17 @@
       "merge_confirm": "Merge and delete",
       "merged": "Merged \"{{name}}\" into \"{{destination}}\"",
       "deleted": "Deleted \"{{name}}\"",
-      "delete_error": "The payee could not be deleted. Anything already moved is kept; try again."
+      "delete_error": "The payee could not be deleted. Anything already moved is kept; try again.",
+      "rules_count_one": "{{count}} rule",
+      "rules_count_other": "{{count}} rules",
+      "rules_for_one": "{{count}} rule for {{name}}",
+      "rules_for_other": "{{count}} rules for {{name}}",
+      "create_rule": "Create rule",
+      "create_rule_for": "Create rule for {{name}}",
+      "merge_rule_title": "Also file future transactions like those of \"{{name}}\" under \"{{destination}}\"?",
+      "merge_rule_description": "A rule can file new transactions under \"{{destination}}\" when their bank description is one that the transactions of \"{{name}}\" had (bank descriptions: {{count}}). You can review the rule before saving it.",
+      "merge_rule_capped": "Only the {{count}} most frequent of {{total}} bank descriptions fit in the rule.",
+      "merge_rule_skip": "Not now"
     },
     "categories": {
       "heading": "Categories",
@@ -1224,7 +1234,9 @@
       "no_match_filter": "No rules match the current filter.",
       "clear_filters": "Clear filters",
       "recategorize_confirm_title": "Re-categorize all activities?",
-      "recategorize_confirm_desc": "This will re-run all rules against every activity in your spending accounts and may overwrite existing auto-categorized assignments. Manual categorizations are preserved."
+      "recategorize_confirm_desc": "This will re-run all rules against every activity in your spending accounts and may overwrite existing auto-categorized assignments. Manual categorizations are preserved.",
+      "payee_filter": "Rules for payee: {{name}}",
+      "payee_filter_clear": "Show all rules"
     }
   },
   "addons_updates_critical_one": "({{count}} critical)",

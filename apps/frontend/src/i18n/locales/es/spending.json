@@ -180,7 +180,37 @@
     "setPayeeNone": "Ningún beneficiario",
     "setPayeeHint": "Las transacciones coincidentes también se archivan con este beneficiario, salvo que hayas elegido uno tú mismo.",
     "setPayeeChip": "También asigna el beneficiario {{name}}",
-    "unknownPayee": "Beneficiario desconocido"
+    "unknownPayee": "Beneficiario desconocido",
+    "runSelected": {
+      "action": "Ejecutar reglas",
+      "title": "Ejecutar las reglas en las transacciones seleccionadas",
+      "loading": "Comprobando qué cambiarían las reglas…",
+      "previewError": "No se pudo comprobar qué cambiarían las reglas. Cierre e inténtelo de nuevo.",
+      "nothing": "Ninguna regla cambia estas transacciones.",
+      "willChange_one": "Las reglas cambiarán {{count}} transacción.",
+      "willChange_many": "Las reglas cambiarán {{count}} transacciones.",
+      "willChange_other": "Las reglas cambiarán {{count}} transacciones.",
+      "keptManual_one": "{{count}} transacción definida a mano se conserva.",
+      "keptManual_many": "{{count}} transacciones definidas a mano se conservan.",
+      "keptManual_other": "{{count}} transacciones definidas a mano se conservan.",
+      "replacesManual_one": "{{count}} transacción definida a mano se reemplaza.",
+      "replacesManual_many": "{{count}} transacciones definidas a mano se reemplazan.",
+      "replacesManual_other": "{{count}} transacciones definidas a mano se reemplazan.",
+      "apply": "Ejecutar reglas",
+      "done_one": "Las reglas cambiaron {{count}} transacción.",
+      "done_many": "Las reglas cambiaron {{count}} transacciones.",
+      "done_other": "Las reglas cambiaron {{count}} transacciones.",
+      "doneKept": "Definidas a mano y conservadas: {{count}}.",
+      "doneReplaced": "Definidas a mano y reemplazadas: {{count}}.",
+      "splitsKept": "Divisiones conservadas: {{count}}.",
+      "error": "No se pudieron ejecutar las reglas."
+    },
+    "override": {
+      "label": "Reemplazar también las categorías y beneficiarios que definí a mano ({{count}})",
+      "confirmTitle": "¿Reemplazar lo que definió a mano?",
+      "confirmDescription": "Donde una regla coincide, reemplaza la categoría y el beneficiario que definió a mano (transacciones afectadas: {{count}}). Esta acción no se puede deshacer.",
+      "confirm": "Reemplazar y ejecutar"
+    }
   },
   "transactions": {
     "filterByPayee": "Mostrar transacciones de {{name}}",

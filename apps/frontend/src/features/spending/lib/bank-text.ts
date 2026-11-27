@@ -7,6 +7,16 @@ const present = (text: string | null | undefined): string | undefined =>
   text?.trim() ? text : undefined;
 
 /**
+ * The text a categorization rule matches a transaction on: the description
+ * its import received, else its notes; blank text is none. Mirrors
+ * `Activity::bank_text` in the core crate, and like it returns the text as
+ * stored, untrimmed.
+ */
+export function getBankText(activity: DescribedActivity): string | undefined {
+  return present(activity.importedDescription) ?? present(activity.notes);
+}
+
+/**
  * The text that names a transaction: the user's notes, or the description its
  * import received when the notes are blank.
  */

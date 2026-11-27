@@ -18,6 +18,8 @@ interface TransactionsBulkBarProps {
   payees: TaxonomyCategory[];
   /** Called with an existing payee's name, a new one to create, or "" to clear. */
   onSetPayee: (name: string) => void;
+  /** Opens the "run rules on the selection" review. */
+  onRunRules: () => void;
   onDelete: () => void;
   onClearSelection: () => void;
 }
@@ -29,6 +31,7 @@ export function TransactionsBulkBar({
   onTagEvent,
   payees,
   onSetPayee,
+  onRunRules,
   onDelete,
   onClearSelection,
 }: TransactionsBulkBarProps) {
@@ -100,6 +103,10 @@ export function TransactionsBulkBar({
             />
           </PopoverContent>
         </Popover>
+        <Button size="sm" variant="outline" onClick={onRunRules}>
+          <Icons.ListFilter className="me-1.5 h-3.5 w-3.5" aria-hidden="true" />
+          {t("spending:rules.runSelected.action")}
+        </Button>
         <Button
           size="sm"
           variant="outline"

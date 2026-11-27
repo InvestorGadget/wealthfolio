@@ -179,7 +179,33 @@
     "setPayeeNone": "支払先なし",
     "setPayeeHint": "一致した取引はこの支払先にも分類されます（ご自身で選択した場合を除く）。",
     "setPayeeChip": "支払先 {{name}} も設定",
-    "unknownPayee": "不明な支払先"
+    "unknownPayee": "不明な支払先",
+    "runSelected": {
+      "action": "ルールを実行",
+      "title": "選択した取引にルールを実行",
+      "loading": "ルールによる変更内容を確認しています…",
+      "previewError": "ルールによる変更内容を確認できませんでした。閉じてからもう一度お試しください。",
+      "nothing": "これらの取引を変更するルールはありません。",
+      "willChange_one": "ルールにより{{count}}件の取引が変更されます。",
+      "willChange_other": "ルールにより{{count}}件の取引が変更されます。",
+      "keptManual_one": "手動で設定した{{count}}件の取引は保持されます。",
+      "keptManual_other": "手動で設定した{{count}}件の取引は保持されます。",
+      "replacesManual_one": "手動で設定した{{count}}件の取引は置き換えられます。",
+      "replacesManual_other": "手動で設定した{{count}}件の取引は置き換えられます。",
+      "apply": "ルールを実行",
+      "done_one": "ルールにより{{count}}件の取引を変更しました。",
+      "done_other": "ルールにより{{count}}件の取引を変更しました。",
+      "doneKept": "手動設定のため保持: {{count}}件。",
+      "doneReplaced": "手動設定を置き換え: {{count}}件。",
+      "splitsKept": "分割を保持: {{count}}件。",
+      "error": "ルールを実行できませんでした。"
+    },
+    "override": {
+      "label": "手動で設定したカテゴリと支払先も置き換える（{{count}}件）",
+      "confirmTitle": "手動で設定した内容を置き換えますか？",
+      "confirmDescription": "ルールに一致する取引では、手動で設定したカテゴリと支払先が置き換えられます（対象の取引: {{count}}件）。この操作は取り消せません。",
+      "confirm": "置き換えて実行"
+    }
   },
   "transactions": {
     "filterByPayee": "{{name}} の取引を表示",

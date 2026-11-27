@@ -1168,7 +1168,17 @@
       "merge_confirm": "合併並刪除",
       "merged": "已將「{{name}}」合併到「{{destination}}」",
       "deleted": "已刪除「{{name}}」",
-      "delete_error": "無法刪除收款方。已移動的內容會保留，請重試。"
+      "delete_error": "無法刪除收款方。已移動的內容會保留，請重試。",
+      "rules_count_one": "{{count}} 條規則",
+      "rules_count_other": "{{count}} 條規則",
+      "rules_for_one": "{{count}} 條規則（{{name}}）",
+      "rules_for_other": "{{count}} 條規則（{{name}}）",
+      "create_rule": "建立規則",
+      "create_rule_for": "建立規則（{{name}}）",
+      "merge_rule_title": "今後類似「{{name}}」的交易也歸入「{{destination}}」嗎？",
+      "merge_rule_description": "當新交易的銀行摘要是「{{name}}」的交易曾有的摘要之一時，規則可將其歸入「{{destination}}」（銀行摘要：{{count}}）。儲存前您可以檢查該規則。",
+      "merge_rule_capped": "規則中只能包含 {{total}} 個銀行摘要中最常見的 {{count}} 個。",
+      "merge_rule_skip": "暫不"
     },
     "categories": {
       "heading": "類別",
@@ -1265,7 +1275,9 @@
       "no_match_filter": "沒有規則比對目前篩選條件。",
       "clear_filters": "清除篩選",
       "recategorize_confirm_title": "要重新分類所有交易紀錄嗎？",
-      "recategorize_confirm_desc": "這會對支出帳戶中的每筆交易紀錄重新執行所有規則，可能覆寫現有的自動分類。手動分類會保留。"
+      "recategorize_confirm_desc": "這會對支出帳戶中的每筆交易紀錄重新執行所有規則，可能覆寫現有的自動分類。手動分類會保留。",
+      "payee_filter": "收款方的規則：{{name}}",
+      "payee_filter_clear": "顯示所有規則"
     }
   },
   "addons_updates_critical_one": "（{{count}} 項重大更新）",

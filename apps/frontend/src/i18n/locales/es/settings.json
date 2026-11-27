@@ -1203,7 +1203,19 @@
       "merge_confirm": "Fusionar y eliminar",
       "merged": "«{{name}}» fusionado con «{{destination}}»",
       "deleted": "«{{name}}» eliminado",
-      "delete_error": "No se pudo eliminar el beneficiario. Lo ya movido se conserva; inténtalo de nuevo."
+      "delete_error": "No se pudo eliminar el beneficiario. Lo ya movido se conserva; inténtalo de nuevo.",
+      "rules_count_one": "{{count}} regla",
+      "rules_count_many": "{{count}} reglas",
+      "rules_count_other": "{{count}} reglas",
+      "rules_for_one": "{{count}} regla de {{name}}",
+      "rules_for_many": "{{count}} reglas de {{name}}",
+      "rules_for_other": "{{count}} reglas de {{name}}",
+      "create_rule": "Crear regla",
+      "create_rule_for": "Crear regla para {{name}}",
+      "merge_rule_title": "¿Clasificar también las futuras transacciones como las de «{{name}}» en «{{destination}}»?",
+      "merge_rule_description": "Una regla puede clasificar las nuevas transacciones en «{{destination}}» cuando su descripción del banco sea una de las que tenían las transacciones de «{{name}}» (descripciones del banco: {{count}}). Podrá revisar la regla antes de guardarla.",
+      "merge_rule_capped": "Solo caben en la regla las {{count}} descripciones del banco más frecuentes de {{total}}.",
+      "merge_rule_skip": "Ahora no"
     },
     "categories": {
       "heading": "Categorías",
@@ -1304,7 +1316,9 @@
       "no_match_filter": "Ninguna regla coincide con el filtro actual.",
       "clear_filters": "Borrar filtros",
       "recategorize_confirm_title": "¿Recategorizar todas las actividades?",
-      "recategorize_confirm_desc": "Esto volverá a ejecutar todas las reglas sobre cada actividad de tus cuentas de gasto y puede sobrescribir las asignaciones autocategorizadas existentes. Las categorizaciones manuales se conservan."
+      "recategorize_confirm_desc": "Esto volverá a ejecutar todas las reglas sobre cada actividad de tus cuentas de gasto y puede sobrescribir las asignaciones autocategorizadas existentes. Las categorizaciones manuales se conservan.",
+      "payee_filter": "Reglas del beneficiario: {{name}}",
+      "payee_filter_clear": "Mostrar todas las reglas"
     }
   },
   "addons_updates_critical_one": "({{count}} crítica)",

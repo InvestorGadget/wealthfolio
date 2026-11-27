@@ -10,6 +10,7 @@ export {
   deleteCategorizationRule,
   rerunCategorizationRules,
   rerunCategorizationRulesDetailed,
+  previewCategorizationRulesRerun,
 } from "../../../adapters/shared/spending";
 
 export const listRulePresets = async (): Promise<RulePresetSummary[]> => {

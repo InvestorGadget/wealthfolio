@@ -144,6 +144,7 @@
         "sync_market_data",
         "rerun_categorization_rules",
         "rerun_categorization_rules_detailed",
+        "preview_categorization_rules_rerun",
         "get_spending_report",
         "get_spending_insight",
         "get_health_status",

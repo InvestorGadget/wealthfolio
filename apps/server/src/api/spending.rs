@@ -24,7 +24,8 @@ use wealthfolio_spending::cash_activities::{
     CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, CategorizationRunSummary, NewCategorizationRule, UpdateCategorizationRule,
+    CategorizationRule, CategorizationRunSummary, NewCategorizationRule, RuleRunScope,
+    UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
@@ -364,12 +365,27 @@ async fn delete_categorization_rule(
 struct RerunRulesBody {
     #[serde(default)]
     only_uncategorized: bool,
+    /// Narrows the run to these activities, and with `override_manual` lets a
+    /// matching rule replace values set by hand on them. The service refuses
+    /// the override without a list.
+    #[serde(flatten)]
+    scope: RuleRunScope,
 }
 
 async fn rerun_categorization_rules(
     axum::Extension(state): axum::Extension<Arc<AppState>>,
     Json(body): Json<RerunRulesBody>,
 ) -> ApiResult<Json<usize>> {
+    // This route runs on every Spending account. A body that asks for a
+    // scope is refused, not run unscoped.
+    if body.scope != RuleRunScope::default() {
+        return Err(anyhow::Error::from(
+            wealthfolio_spending::error::SpendingError::InvalidInput {
+                message: "This route does not take a scope; use the detailed rerun".to_string(),
+            },
+        )
+        .into());
+    }
     let s = state.spending_settings_service.get().await?;
     if !s.enabled {
         return Ok(Json(0));
@@ -388,12 +404,34 @@ async fn rerun_categorization_rules_detailed(
 ) -> ApiResult<Json<CategorizationRunSummary>> {
     let settings = state.spending_settings_service.get().await?;
     if !settings.enabled {
+        body.scope
+            .manual_overrides(body.only_uncategorized)
+            .map_err(anyhow::Error::from)?;
         return Ok(Json(CategorizationRunSummary::default()));
     }
     Ok(Json(
         state
             .categorization_rules_service
-            .rerun_detailed(&settings.account_ids, body.only_uncategorized)
+            .rerun_scoped(&settings.account_ids, body.only_uncategorized, &body.scope)
+            .await?,
+    ))
+}
+
+async fn preview_categorization_rules_rerun(
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
+    Json(body): Json<RerunRulesBody>,
+) -> ApiResult<Json<CategorizationRunSummary>> {
+    let settings = state.spending_settings_service.get().await?;
+    if !settings.enabled {
+        body.scope
+            .manual_overrides(body.only_uncategorized)
+            .map_err(anyhow::Error::from)?;
+        return Ok(Json(CategorizationRunSummary::default()));
+    }
+    Ok(Json(
+        state
+            .categorization_rules_service
+            .preview_scoped(&settings.account_ids, body.only_uncategorized, &body.scope)
             .await?,
     ))
 }
@@ -887,6 +925,10 @@ pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
             "/spending/rules/rerun/detailed",
             post(rerun_categorization_rules_detailed),
         )
+        .route(
+            "/spending/rules/rerun/preview",
+            post(preview_categorization_rules_rerun),
+        )
         .route("/spending/rule-presets", get(list_rule_presets))
         .route(
             "/spending/rule-presets/{preset_id}/import",
@@ -961,6 +1003,42 @@ pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rule_run_body_is_unscoped_and_protected_unless_it_says_otherwise() {
+        // What every caller sent before runs could be scoped.
+        let legacy: RerunRulesBody =
+            serde_json::from_value(serde_json::json!({ "onlyUncategorized": true })).unwrap();
+        assert!(legacy.only_uncategorized);
+        assert_eq!(legacy.scope, RuleRunScope::default());
+
+        let scoped: RerunRulesBody = serde_json::from_value(serde_json::json!({
+            "onlyUncategorized": false,
+            "activityIds": ["a1", "a2"],
+            "overrideManual": true
+        }))
+        .unwrap();
+        assert_eq!(
+            scoped.scope,
+            RuleRunScope {
+                activity_ids: Some(vec!["a1".to_string(), "a2".to_string()]),
+                override_manual: true,
+            }
+        );
+
+        // A scope is how the unscoped route tells a body it must refuse.
+        assert_ne!(scoped.scope, RuleRunScope::default());
+        let explicit_default: RerunRulesBody = serde_json::from_value(
+            serde_json::json!({ "onlyUncategorized": true, "overrideManual": false }),
+        )
+        .unwrap();
+        assert_eq!(explicit_default.scope, RuleRunScope::default());
+
+        // The override without a list is refused before anything runs.
+        let unscoped: RerunRulesBody =
+            serde_json::from_value(serde_json::json!({ "overrideManual": true })).unwrap();
+        assert!(unscoped.scope.manual_overrides(false).is_err());
+    }
 
     #[test]
     fn parses_cash_activity_array_query_filters() {

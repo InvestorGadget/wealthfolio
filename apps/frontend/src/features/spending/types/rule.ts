@@ -11,6 +11,26 @@ export interface CategorizationRunSummary {
   unchanged: number;
   incompatible: number;
   withoutTarget: number;
+  /** Transactions changed in at least one of category and payee. The counts above are per value. */
+  changedActivities: number;
+  /** Transactions that kept a hand-set value a rule would have filed differently. */
+  keptManualActivities: number;
+  keptManualCategories: number;
+  keptManualPayees: number;
+  /** Transactions where the run replaced a hand-set value. Zero without `overrideManual`. */
+  replacedManualActivities: number;
+}
+
+/** Narrows a rule run to some transactions. */
+export interface CategorizationRunScope {
+  /** Run on these transactions only. */
+  activityIds: string[];
+  /**
+   * Also replace categories and payees set by hand, where a rule matches. The
+   * server refuses it for a run that lists no transactions, and for an
+   * uncategorized-only run.
+   */
+  overrideManual?: boolean;
 }
 
 /** Amount condition operator. Compares against the activity's unsigned amount. */

@@ -149,21 +149,28 @@ impl ActivityTaxonomyAssignmentService {
         self.repo.assign_many_single_select(items).await
     }
 
+    /// `replace_manual_for` names the activities whose hand-set values the
+    /// rules may replace; empty for every run that is not an explicit,
+    /// activity-scoped override.
     pub async fn apply_rules_detailed(
         &self,
         items: Vec<NewActivityTaxonomyAssignment>,
         only_uncategorized: bool,
+        replace_manual_for: std::collections::HashSet<String>,
     ) -> Result<super::RuleAssignmentResult> {
         self.repo
-            .assign_rules_detailed(items, only_uncategorized)
+            .assign_rules_replacing_manual(items, only_uncategorized, replace_manual_for)
             .await
     }
     pub async fn preview_rules(
         &self,
         items: Vec<NewActivityTaxonomyAssignment>,
         only_uncategorized: bool,
+        replace_manual_for: std::collections::HashSet<String>,
     ) -> Result<super::RuleAssignmentResult> {
-        self.repo.preview_rules(items, only_uncategorized).await
+        self.repo
+            .preview_rules_replacing_manual(items, only_uncategorized, replace_manual_for)
+            .await
     }
 }
 

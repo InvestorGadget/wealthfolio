@@ -2,6 +2,7 @@
 import type { SpendCategory, SpendCategoryKind } from "@wealthfolio/addon-sdk";
 import type {
   CategorizationRule,
+  CategorizationRunScope,
   CategorizationRunSummary,
   NewCategorizationRule,
   UpdateCategorizationRule,
@@ -104,15 +105,37 @@ export const rerunCategorizationRules = async (onlyUncategorized: boolean): Prom
   }
 };
 
+/**
+ * `scope` narrows the run to the listed transactions. Without one the run
+ * covers every Spending account and never replaces what was set by hand.
+ */
 export const rerunCategorizationRulesDetailed = async (
   onlyUncategorized: boolean,
+  scope?: CategorizationRunScope,
 ): Promise<CategorizationRunSummary> => {
   try {
     return await invoke<CategorizationRunSummary>("rerun_categorization_rules_detailed", {
       onlyUncategorized,
+      ...scope,
     });
   } catch (e) {
     logger.error("Error re-running categorization rules.");
+    throw e;
+  }
+};
+
+/** What `rerunCategorizationRulesDetailed` would do with the same arguments, without writing. */
+export const previewCategorizationRulesRerun = async (
+  onlyUncategorized: boolean,
+  scope?: CategorizationRunScope,
+): Promise<CategorizationRunSummary> => {
+  try {
+    return await invoke<CategorizationRunSummary>("preview_categorization_rules_rerun", {
+      onlyUncategorized,
+      ...scope,
+    });
+  } catch (e) {
+    logger.error("Error previewing categorization rules.");
     throw e;
   }
 };

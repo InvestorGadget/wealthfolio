@@ -28,6 +28,7 @@ import {
 } from "@wealthfolio/ui";
 
 import { findPayee, PAYEES_TAXONOMY_ID } from "../lib/payee";
+import type { RuleDraft } from "../lib/payee-rules";
 import {
   isAnyOfMode,
   MAX_REGEX_PATTERN_LENGTH,
@@ -230,6 +231,8 @@ export interface RuleFormAccountOption {
 
 interface RuleFormProps {
   rule?: CategorizationRule;
+  /** What a new rule's form starts from. Ignored when editing `rule`. */
+  draft?: RuleDraft;
   /** Flat list of what a rule can set: spending, income and savings categories, and payees. */
   categoryOptions: RuleFormCategoryOption[];
   /** Tracked spending accounts the rule can be scoped to. */
@@ -242,7 +245,7 @@ interface RuleFormProps {
 const NONE = "__none__";
 const ALL_ACCOUNTS = "__all__";
 
-const composite = (rule?: CategorizationRule): string => {
+const composite = (rule?: Pick<CategorizationRule, "taxonomyId" | "categoryId">): string => {
   if (rule?.taxonomyId && rule?.categoryId) return `${rule.taxonomyId}:${rule.categoryId}`;
   return "";
 };
@@ -322,6 +325,7 @@ function RulePayeePicker({
 
 export function RuleForm({
   rule,
+  draft,
   categoryOptions,
   accountOptions,
   onSubmit,
@@ -389,19 +393,26 @@ export function RuleForm({
 
   // The stored text condition as the form edits it: a payee-only rule shows
   // an empty text, never its placeholder, and a compiled list shows the list.
-  const initialText = useMemo(() => textConditionDraft(rule), [rule]);
+  const initialText = useMemo(() => {
+    if (rule) return textConditionDraft(rule);
+    return textConditionDraft(
+      draft?.pattern !== undefined
+        ? { pattern: draft.pattern, matchType: draft.matchType ?? "contains" }
+        : undefined,
+    );
+  }, [rule, draft]);
 
   const form = useForm<RuleFormState>({
     resolver: zodResolver(ruleFormSchema) as never,
     defaultValues: {
-      name: rule?.name ?? "",
+      name: rule?.name ?? draft?.name ?? "",
       pattern: initialText.pattern,
       patternList: initialText.list,
       matchType: initialText.mode,
-      payeeConditionId: rule?.payeeConditionId ?? null,
+      payeeConditionId: rule?.payeeConditionId ?? draft?.payeeConditionId ?? null,
       setPayeeId: rule?.setPayeeId ?? null,
-      taxonomyId: rule?.taxonomyId ?? "",
-      categoryId: composite(rule), // we encode taxonomyId:categoryId in this single field
+      taxonomyId: rule?.taxonomyId ?? draft?.taxonomyId ?? "",
+      categoryId: composite(rule ?? draft), // we encode taxonomyId:categoryId in this single field
       activityType: rule?.activityType ?? "",
       amountOp: rule?.amountOp ?? "",
       amountValue: rule?.amountValue != null ? String(rule.amountValue) : "",

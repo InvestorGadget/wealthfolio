@@ -1154,7 +1154,17 @@
       "merge_confirm": "합치고 삭제",
       "merged": "‘{{name}}’을(를) ‘{{destination}}’에 합쳤습니다",
       "deleted": "‘{{name}}’을(를) 삭제했습니다",
-      "delete_error": "거래처를 삭제하지 못했습니다. 이미 옮긴 항목은 유지됩니다. 다시 시도하세요."
+      "delete_error": "거래처를 삭제하지 못했습니다. 이미 옮긴 항목은 유지됩니다. 다시 시도하세요.",
+      "rules_count_one": "규칙 {{count}}개",
+      "rules_count_other": "규칙 {{count}}개",
+      "rules_for_one": "규칙 {{count}}개 ({{name}})",
+      "rules_for_other": "규칙 {{count}}개 ({{name}})",
+      "create_rule": "규칙 만들기",
+      "create_rule_for": "규칙 만들기 ({{name}})",
+      "merge_rule_title": "앞으로 \"{{name}}\"와 같은 거래도 \"{{destination}}\"(으)로 분류할까요?",
+      "merge_rule_description": "은행 적요가 \"{{name}}\"의 거래에 있던 것 중 하나인 새 거래를 규칙으로 \"{{destination}}\"에 분류할 수 있습니다(은행 적요: {{count}}개). 저장하기 전에 규칙을 검토할 수 있습니다.",
+      "merge_rule_capped": "은행 적요 {{total}}개 중 가장 자주 나온 {{count}}개만 규칙에 들어갑니다.",
+      "merge_rule_skip": "나중에"
     },
     "categories": {
       "heading": "카테고리",
@@ -1248,7 +1258,9 @@
       "no_match_filter": "현재 필터와 일치하는 규칙이 없습니다.",
       "clear_filters": "필터 지우기",
       "recategorize_confirm_title": "모든 활동을 재분류하시겠습니까?",
-      "recategorize_confirm_desc": "지출 계좌의 모든 활동에 모든 규칙을 다시 실행하며, 기존의 자동 분류된 항목을 덮어쓸 수 있습니다. 수동 분류는 유지됩니다."
+      "recategorize_confirm_desc": "지출 계좌의 모든 활동에 모든 규칙을 다시 실행하며, 기존의 자동 분류된 항목을 덮어쓸 수 있습니다. 수동 분류는 유지됩니다.",
+      "payee_filter": "거래처의 규칙: {{name}}",
+      "payee_filter_clear": "모든 규칙 보기"
     }
   },
   "addons_updates_critical_one": "(긴급 {{count}}개)",

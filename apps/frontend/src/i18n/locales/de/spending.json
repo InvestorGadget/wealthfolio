@@ -179,7 +179,33 @@
     "setPayeeNone": "Kein Zahlungsempfänger",
     "setPayeeHint": "Passende Transaktionen werden auch diesem Zahlungsempfänger zugeordnet, sofern Sie nicht selbst einen gewählt haben.",
     "setPayeeChip": "Legt auch den Zahlungsempfänger {{name}} fest",
-    "unknownPayee": "Unbekannter Zahlungsempfänger"
+    "unknownPayee": "Unbekannter Zahlungsempfänger",
+    "runSelected": {
+      "action": "Regeln ausführen",
+      "title": "Regeln auf die ausgewählten Transaktionen anwenden",
+      "loading": "Es wird geprüft, was die Regeln ändern würden…",
+      "previewError": "Es konnte nicht geprüft werden, was die Regeln ändern würden. Schließen Sie den Dialog und versuchen Sie es erneut.",
+      "nothing": "Keine Regel ändert diese Transaktionen.",
+      "willChange_one": "Die Regeln ändern {{count}} Transaktion.",
+      "willChange_other": "Die Regeln ändern {{count}} Transaktionen.",
+      "keptManual_one": "{{count}} von Hand festgelegte Transaktion bleibt erhalten.",
+      "keptManual_other": "{{count}} von Hand festgelegte Transaktionen bleiben erhalten.",
+      "replacesManual_one": "{{count}} von Hand festgelegte Transaktion wird ersetzt.",
+      "replacesManual_other": "{{count}} von Hand festgelegte Transaktionen werden ersetzt.",
+      "apply": "Regeln ausführen",
+      "done_one": "Die Regeln haben {{count}} Transaktion geändert.",
+      "done_other": "Die Regeln haben {{count}} Transaktionen geändert.",
+      "doneKept": "Von Hand festgelegt und beibehalten: {{count}}.",
+      "doneReplaced": "Von Hand festgelegt und ersetzt: {{count}}.",
+      "splitsKept": "Aufteilungen beibehalten: {{count}}.",
+      "error": "Die Regeln konnten nicht ausgeführt werden."
+    },
+    "override": {
+      "label": "Auch Kategorien und Zahlungsempfänger ersetzen, die ich von Hand festgelegt habe ({{count}})",
+      "confirmTitle": "Von Hand Festgelegtes ersetzen?",
+      "confirmDescription": "Wo eine Regel zutrifft, ersetzt sie die Kategorie und den Zahlungsempfänger, die Sie von Hand festgelegt haben (betroffene Transaktionen: {{count}}). Dies kann nicht rückgängig gemacht werden.",
+      "confirm": "Ersetzen und ausführen"
+    }
   },
   "transactions": {
     "filterByPayee": "Transaktionen für {{name}} anzeigen",

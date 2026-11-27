@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::activity_splits::ActivitySplit;
 use anyhow::Result;
@@ -80,6 +80,39 @@ pub trait ActivityTaxonomyAssignmentRepositoryTrait: Send + Sync {
     ) -> Result<super::RuleAssignmentResult> {
         Err(anyhow::anyhow!(
             "Rule preview is unavailable for this repository"
+        ))
+    }
+
+    /// `assign_rules_detailed` for a run the user allowed to replace values set
+    /// by hand. Only an item whose activity is in `replace_manual_for` may
+    /// replace a manual assignment, and only with a different value; for every
+    /// other activity the manual assignment stands, as it always does. Splits
+    /// stay protected. An empty set is exactly `assign_rules_detailed`.
+    async fn assign_rules_replacing_manual(
+        &self,
+        items: Vec<NewActivityTaxonomyAssignment>,
+        only_uncategorized: bool,
+        replace_manual_for: HashSet<String>,
+    ) -> Result<super::RuleAssignmentResult> {
+        if replace_manual_for.is_empty() {
+            return self.assign_rules_detailed(items, only_uncategorized).await;
+        }
+        Err(anyhow::anyhow!(
+            "Replacing manual assignments is unavailable for this repository"
+        ))
+    }
+    /// Read-only counterpart of `assign_rules_replacing_manual`.
+    async fn preview_rules_replacing_manual(
+        &self,
+        items: Vec<NewActivityTaxonomyAssignment>,
+        only_uncategorized: bool,
+        replace_manual_for: HashSet<String>,
+    ) -> Result<super::RuleAssignmentResult> {
+        if replace_manual_for.is_empty() {
+            return self.preview_rules(items, only_uncategorized).await;
+        }
+        Err(anyhow::anyhow!(
+            "Replacing manual assignments is unavailable for this repository"
         ))
     }
 

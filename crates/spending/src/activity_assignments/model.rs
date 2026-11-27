@@ -73,4 +73,22 @@ pub struct RuleAssignmentResult {
     pub unchanged: usize,
     pub incompatible: usize,
     pub without_target: usize,
+    /// Activities the run changes in at least one taxonomy. The counts above
+    /// are per value (an activity's category and its payee count separately).
+    #[serde(default)]
+    pub changed_activities: usize,
+    /// Activities that kept a value set by hand where a rule would have filed
+    /// them under a different one. A hand-set value the rule agrees with is
+    /// not counted: replacing it would change nothing.
+    #[serde(default)]
+    pub kept_manual_activities: usize,
+    /// The same, per value: hand-set categories and hand-set payees kept.
+    #[serde(default)]
+    pub kept_manual_categories: usize,
+    #[serde(default)]
+    pub kept_manual_payees: usize,
+    /// Activities where the run replaced a value set by hand. Only a run the
+    /// user scoped to activities and allowed to replace them has any.
+    #[serde(default)]
+    pub replaced_manual_activities: usize,
 }

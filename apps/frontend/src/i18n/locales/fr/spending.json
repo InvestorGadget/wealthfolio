@@ -180,7 +180,37 @@
     "setPayeeNone": "Aucun bénéficiaire",
     "setPayeeHint": "Les transactions correspondantes sont aussi classées sous ce bénéficiaire, sauf si vous en avez choisi un vous-même.",
     "setPayeeChip": "Définit aussi le bénéficiaire {{name}}",
-    "unknownPayee": "Bénéficiaire inconnu"
+    "unknownPayee": "Bénéficiaire inconnu",
+    "runSelected": {
+      "action": "Exécuter les règles",
+      "title": "Exécuter les règles sur les transactions sélectionnées",
+      "loading": "Vérification de ce que les règles modifieraient…",
+      "previewError": "Impossible de vérifier ce que les règles modifieraient. Fermez et réessayez.",
+      "nothing": "Aucune règle ne modifie ces transactions.",
+      "willChange_one": "Les règles modifieront {{count}} transaction.",
+      "willChange_many": "Les règles modifieront {{count}} transactions.",
+      "willChange_other": "Les règles modifieront {{count}} transactions.",
+      "keptManual_one": "{{count}} transaction définie manuellement est conservée.",
+      "keptManual_many": "{{count}} transactions définies manuellement sont conservées.",
+      "keptManual_other": "{{count}} transactions définies manuellement sont conservées.",
+      "replacesManual_one": "{{count}} transaction définie manuellement est remplacée.",
+      "replacesManual_many": "{{count}} transactions définies manuellement sont remplacées.",
+      "replacesManual_other": "{{count}} transactions définies manuellement sont remplacées.",
+      "apply": "Exécuter les règles",
+      "done_one": "Les règles ont modifié {{count}} transaction.",
+      "done_many": "Les règles ont modifié {{count}} transactions.",
+      "done_other": "Les règles ont modifié {{count}} transactions.",
+      "doneKept": "Définies manuellement et conservées : {{count}}.",
+      "doneReplaced": "Définies manuellement et remplacées : {{count}}.",
+      "splitsKept": "Répartitions conservées : {{count}}.",
+      "error": "Échec de l'exécution des règles."
+    },
+    "override": {
+      "label": "Remplacer aussi les catégories et bénéficiaires que j'ai définis manuellement ({{count}})",
+      "confirmTitle": "Remplacer ce que vous avez défini manuellement ?",
+      "confirmDescription": "Là où une règle correspond, elle remplace la catégorie et le bénéficiaire que vous avez définis manuellement (transactions concernées : {{count}}). Cette action est irréversible.",
+      "confirm": "Remplacer et exécuter"
+    }
   },
   "transactions": {
     "filterByPayee": "Afficher les transactions de {{name}}",

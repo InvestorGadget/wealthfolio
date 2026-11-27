@@ -1206,7 +1206,19 @@
       "merge_confirm": "Fusionner et supprimer",
       "merged": "« {{name}} » fusionné avec « {{destination}} »",
       "deleted": "« {{name}} » supprimé",
-      "delete_error": "Impossible de supprimer le bénéficiaire. Ce qui a déjà été déplacé est conservé ; réessayez."
+      "delete_error": "Impossible de supprimer le bénéficiaire. Ce qui a déjà été déplacé est conservé ; réessayez.",
+      "rules_count_one": "{{count}} règle",
+      "rules_count_many": "{{count}} règles",
+      "rules_count_other": "{{count}} règles",
+      "rules_for_one": "{{count}} règle pour {{name}}",
+      "rules_for_many": "{{count}} règles pour {{name}}",
+      "rules_for_other": "{{count}} règles pour {{name}}",
+      "create_rule": "Créer une règle",
+      "create_rule_for": "Créer une règle pour {{name}}",
+      "merge_rule_title": "Classer aussi les futures transactions comme celles de « {{name}} » sous « {{destination}} » ?",
+      "merge_rule_description": "Une règle peut classer les nouvelles transactions sous « {{destination}} » lorsque leur libellé bancaire est l'un de ceux des transactions de « {{name}} » (libellés bancaires : {{count}}). Vous pourrez vérifier la règle avant de l'enregistrer.",
+      "merge_rule_capped": "Seuls les {{count}} libellés bancaires les plus fréquents sur {{total}} tiennent dans la règle.",
+      "merge_rule_skip": "Pas maintenant"
     },
     "categories": {
       "heading": "Catégories",
@@ -1307,7 +1319,9 @@
       "no_match_filter": "Aucune règle ne correspond au filtre actuel.",
       "clear_filters": "Effacer les filtres",
       "recategorize_confirm_title": "Recatégoriser toutes les activités ?",
-      "recategorize_confirm_desc": "Cela réexécutera toutes les règles sur chaque activité de vos comptes de dépenses et pourrait écraser les attributions auto-catégorisées existantes. Les catégorisations manuelles sont préservées."
+      "recategorize_confirm_desc": "Cela réexécutera toutes les règles sur chaque activité de vos comptes de dépenses et pourrait écraser les attributions auto-catégorisées existantes. Les catégorisations manuelles sont préservées.",
+      "payee_filter": "Règles pour le bénéficiaire : {{name}}",
+      "payee_filter_clear": "Afficher toutes les règles"
     }
   },
   "fx_title": "Taux de change",

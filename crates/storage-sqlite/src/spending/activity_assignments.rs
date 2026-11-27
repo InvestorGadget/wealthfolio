@@ -144,17 +144,30 @@ fn clear_splits_for_activities_tx(
 }
 
 enum RuleDecision {
-    Eligible(bool),
+    Eligible {
+        had_existing: bool,
+        replaces_manual: bool,
+    },
     Split,
-    Manual,
+    /// A value set by hand stands. `differs` is whether the rule would have
+    /// filed the activity under another one.
+    Manual {
+        differs: bool,
+    },
     Existing,
     Unchanged,
 }
+/// `replace_manual_for` holds the activities the user allowed the run to
+/// replace hand-set values on. Everywhere else a manual assignment ends the
+/// decision, whatever the mode; and an uncategorized-only run keeps every
+/// existing value, so there the set is not consulted at all.
 fn rule_decision(
     conn: &mut SqliteConnection,
     item: &NewActivityTaxonomyAssignment,
     only_uncategorized: bool,
+    replace_manual_for: &HashSet<String>,
 ) -> wealthfolio_core::Result<RuleDecision> {
+    let replace_manual = !only_uncategorized && replace_manual_for.contains(&item.activity_id);
     // Splits stand in for the category, so a rule must not write one beside
     // them. A payee is not part of the split and can still be set.
     let replaces_splits = is_category_taxonomy(&item.taxonomy_id);
@@ -177,7 +190,18 @@ fn rule_decision(
         .iter()
         .any(|a| a.source.eq_ignore_ascii_case("manual"))
     {
-        return Ok(RuleDecision::Manual);
+        let differs = existing.iter().any(|a| a.category_id != item.category_id);
+        if !replace_manual {
+            return Ok(RuleDecision::Manual { differs });
+        }
+        // The rule agrees with the hand-set value: it stays the user's.
+        if !differs {
+            return Ok(RuleDecision::Unchanged);
+        }
+        return Ok(RuleDecision::Eligible {
+            had_existing: true,
+            replaces_manual: true,
+        });
     }
     if only_uncategorized && !existing.is_empty() {
         return Ok(RuleDecision::Existing);
@@ -189,18 +213,56 @@ fn rule_decision(
     {
         return Ok(RuleDecision::Unchanged);
     }
-    Ok(RuleDecision::Eligible(!existing.is_empty()))
+    Ok(RuleDecision::Eligible {
+        had_existing: !existing.is_empty(),
+        replaces_manual: false,
+    })
 }
-fn count_rule_decision(
-    summary: &mut wealthfolio_spending::activity_assignments::RuleAssignmentResult,
-    decision: &RuleDecision,
-) {
-    match decision {
-        RuleDecision::Eligible(_) => summary.eligible += 1,
-        RuleDecision::Split => summary.protected_splits += 1,
-        RuleDecision::Manual => summary.protected_manual += 1,
-        RuleDecision::Existing => summary.skipped_existing += 1,
-        RuleDecision::Unchanged => summary.unchanged += 1,
+
+/// Counts the writer's decisions: per value, and per activity where one
+/// activity can have two values (its category and its payee) decided.
+#[derive(Default)]
+struct RuleTally {
+    result: wealthfolio_spending::activity_assignments::RuleAssignmentResult,
+    changed: HashSet<String>,
+    kept_manual: HashSet<String>,
+    replaced_manual: HashSet<String>,
+}
+impl RuleTally {
+    fn count(&mut self, item: &NewActivityTaxonomyAssignment, decision: &RuleDecision) {
+        let summary = &mut self.result;
+        match decision {
+            RuleDecision::Eligible {
+                replaces_manual, ..
+            } => {
+                summary.eligible += 1;
+                self.changed.insert(item.activity_id.clone());
+                if *replaces_manual {
+                    self.replaced_manual.insert(item.activity_id.clone());
+                }
+            }
+            RuleDecision::Split => summary.protected_splits += 1,
+            RuleDecision::Manual { differs } => {
+                summary.protected_manual += 1;
+                if *differs {
+                    self.kept_manual.insert(item.activity_id.clone());
+                    if is_category_taxonomy(&item.taxonomy_id) {
+                        summary.kept_manual_categories += 1;
+                    } else {
+                        summary.kept_manual_payees += 1;
+                    }
+                }
+            }
+            RuleDecision::Existing => summary.skipped_existing += 1,
+            RuleDecision::Unchanged => summary.unchanged += 1,
+        }
+    }
+    fn finish(self) -> wealthfolio_spending::activity_assignments::RuleAssignmentResult {
+        let mut result = self.result;
+        result.changed_activities = self.changed.len();
+        result.kept_manual_activities = self.kept_manual.len();
+        result.replaced_manual_activities = self.replaced_manual.len();
+        result
     }
 }
 
@@ -522,19 +584,37 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
         items: Vec<NewActivityTaxonomyAssignment>,
         only_uncategorized: bool,
     ) -> Result<wealthfolio_spending::activity_assignments::RuleAssignmentResult> {
+        self.preview_rules_replacing_manual(items, only_uncategorized, HashSet::new())
+            .await
+    }
+    async fn preview_rules_replacing_manual(
+        &self,
+        items: Vec<NewActivityTaxonomyAssignment>,
+        only_uncategorized: bool,
+        replace_manual_for: HashSet<String>,
+    ) -> Result<wealthfolio_spending::activity_assignments::RuleAssignmentResult> {
         let mut conn = get_connection(&self.pool).map_err(|e| anyhow::anyhow!(e))?;
-        let mut result =
-            wealthfolio_spending::activity_assignments::RuleAssignmentResult::default();
+        let mut tally = RuleTally::default();
         for item in items {
-            let decision = rule_decision(&mut conn, &item, only_uncategorized)?;
-            count_rule_decision(&mut result, &decision);
+            let decision =
+                rule_decision(&mut conn, &item, only_uncategorized, &replace_manual_for)?;
+            tally.count(&item, &decision);
         }
-        Ok(result)
+        Ok(tally.finish())
     }
     async fn assign_rules_detailed(
         &self,
         items: Vec<NewActivityTaxonomyAssignment>,
         only_uncategorized: bool,
+    ) -> Result<wealthfolio_spending::activity_assignments::RuleAssignmentResult> {
+        self.assign_rules_replacing_manual(items, only_uncategorized, HashSet::new())
+            .await
+    }
+    async fn assign_rules_replacing_manual(
+        &self,
+        items: Vec<NewActivityTaxonomyAssignment>,
+        only_uncategorized: bool,
+        replace_manual_for: HashSet<String>,
     ) -> Result<wealthfolio_spending::activity_assignments::RuleAssignmentResult> {
         if items.is_empty() {
             return Ok(Default::default());
@@ -543,12 +623,12 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
         let result = self
             .writer
             .exec_tx(move |tx| {
-                let mut result =
-                    wealthfolio_spending::activity_assignments::RuleAssignmentResult::default();
+                let mut tally = RuleTally::default();
                 for item in items {
-                    let decision = rule_decision(tx.conn(), &item, only_uncategorized)?;
-                    count_rule_decision(&mut result, &decision);
-                    let RuleDecision::Eligible(had_existing) = decision else {
+                    let decision =
+                        rule_decision(tx.conn(), &item, only_uncategorized, &replace_manual_for)?;
+                    tally.count(&item, &decision);
+                    let RuleDecision::Eligible { had_existing, .. } = decision else {
                         continue;
                     };
                     let NewActivityTaxonomyAssignment {
@@ -597,12 +677,13 @@ impl ActivityTaxonomyAssignmentRepositoryTrait for ActivityTaxonomyAssignmentRep
                             tx.insert(&inserted)?;
                         }
                     }
-                    result
+                    tally
+                        .result
                         .assignments
                         .push(ActivityTaxonomyAssignment::from(inserted));
-                    result.changed += 1;
+                    tally.result.changed += 1;
                 }
-                Ok(result)
+                Ok(tally.finish())
             })
             .await
             .map_err(|e| anyhow::anyhow!(e))?;
@@ -1344,5 +1425,322 @@ mod tests {
             .load::<String>(&mut conn)
             .expect("load outbox entities");
         assert_eq!(entities, vec!["activity_taxonomy_assignment".to_string()]);
+    }
+
+    // ----- rule runs and values set by hand --------------------------------
+
+    fn by_rule(activity: &str, taxonomy: &str, category: &str) -> NewActivityTaxonomyAssignment {
+        NewActivityTaxonomyAssignment {
+            source: "rule".to_string(),
+            ..manual(activity, taxonomy, category)
+        }
+    }
+
+    fn only(ids: &[&str]) -> HashSet<String> {
+        ids.iter().map(|id| id.to_string()).collect()
+    }
+
+    /// `(category_id, source)` of every assignment of an activity, by taxonomy.
+    async fn stored(
+        repo: &ActivityTaxonomyAssignmentRepository,
+        activity: &str,
+    ) -> Vec<(String, String, String)> {
+        let mut rows: Vec<_> = repo
+            .list_for_activity(activity)
+            .await
+            .expect("list assignments")
+            .into_iter()
+            .map(|a| (a.taxonomy_id, a.category_id, a.source))
+            .collect();
+        rows.sort();
+        rows
+    }
+
+    fn row(taxonomy: &str, category: &str, source: &str) -> (String, String, String) {
+        (taxonomy.into(), category.into(), source.into())
+    }
+
+    /// Two activities, each with a category and a payee the user set by hand.
+    async fn hand_categorized() -> (ActivityTaxonomyAssignmentRepository, TestDir) {
+        let (pool, writer, dir) = setup_db();
+        {
+            let mut conn = get_connection(&pool).expect("conn");
+            insert_account_and_activity(&mut conn, "listed", "MANUAL");
+            insert_account_and_activity(&mut conn, "unlisted", "MANUAL");
+            insert_payee(&mut conn, "payee_friend");
+            insert_payee(&mut conn, "payee_bakery");
+        }
+        let repo = ActivityTaxonomyAssignmentRepository::new(pool, writer);
+        repo.assign_many_single_select(vec![
+            manual("listed", "spending_categories", "cat_food"),
+            manual("listed", "payees", "payee_friend"),
+            manual("unlisted", "spending_categories", "cat_food"),
+            manual("unlisted", "payees", "payee_friend"),
+        ])
+        .await
+        .expect("assign by hand");
+        (repo, dir)
+    }
+
+    fn rule_items() -> Vec<NewActivityTaxonomyAssignment> {
+        vec![
+            by_rule("listed", "spending_categories", "cat_groceries"),
+            by_rule("listed", "payees", "payee_bakery"),
+            by_rule("unlisted", "spending_categories", "cat_groceries"),
+            by_rule("unlisted", "payees", "payee_bakery"),
+        ]
+    }
+
+    #[tokio::test]
+    async fn a_rule_run_without_the_override_never_replaces_a_value_set_by_hand() {
+        for only_uncategorized in [true, false] {
+            let (repo, _dir) = hand_categorized().await;
+
+            let preview = repo
+                .preview_rules(rule_items(), only_uncategorized)
+                .await
+                .expect("preview");
+            let result = repo
+                .assign_rules_detailed(rule_items(), only_uncategorized)
+                .await
+                .expect("run rules");
+
+            for summary in [&preview, &result] {
+                assert_eq!(summary.eligible, 0);
+                assert_eq!(summary.changed_activities, 0);
+                assert_eq!(summary.protected_manual, 4);
+                assert_eq!(summary.kept_manual_activities, 2);
+                assert_eq!(summary.kept_manual_categories, 2);
+                assert_eq!(summary.kept_manual_payees, 2);
+                assert_eq!(summary.replaced_manual_activities, 0);
+            }
+            assert!(result.assignments.is_empty());
+            for activity in ["listed", "unlisted"] {
+                assert_eq!(
+                    stored(&repo, activity).await,
+                    vec![
+                        row("payees", "payee_friend", "manual"),
+                        row("spending_categories", "cat_food", "manual"),
+                    ]
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn the_override_replaces_values_set_by_hand_only_on_the_listed_activities() {
+        {
+            let only_uncategorized = false;
+            let (repo, _dir) = hand_categorized().await;
+
+            let preview = repo
+                .preview_rules_replacing_manual(rule_items(), only_uncategorized, only(&["listed"]))
+                .await
+                .expect("preview");
+            // The preview writes nothing.
+            assert_eq!(
+                stored(&repo, "listed").await,
+                vec![
+                    row("payees", "payee_friend", "manual"),
+                    row("spending_categories", "cat_food", "manual"),
+                ]
+            );
+            let result = repo
+                .assign_rules_replacing_manual(rule_items(), only_uncategorized, only(&["listed"]))
+                .await
+                .expect("run rules");
+
+            for summary in [&preview, &result] {
+                assert_eq!(summary.eligible, 2);
+                assert_eq!(summary.changed_activities, 1);
+                assert_eq!(summary.replaced_manual_activities, 1);
+                assert_eq!(summary.protected_manual, 2);
+                assert_eq!(summary.kept_manual_activities, 1);
+            }
+            assert_eq!(result.changed, 2);
+            assert_eq!(
+                stored(&repo, "listed").await,
+                vec![
+                    row("payees", "payee_bakery", "rule"),
+                    row("spending_categories", "cat_groceries", "rule"),
+                ]
+            );
+            assert_eq!(
+                stored(&repo, "unlisted").await,
+                vec![
+                    row("payees", "payee_friend", "manual"),
+                    row("spending_categories", "cat_food", "manual"),
+                ]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn an_uncategorized_only_run_keeps_values_set_by_hand_whatever_it_is_given() {
+        // The service refuses this combination; the writer does not act on it either.
+        let (repo, _dir) = hand_categorized().await;
+
+        let preview = repo
+            .preview_rules_replacing_manual(rule_items(), true, only(&["listed"]))
+            .await
+            .expect("preview");
+        let result = repo
+            .assign_rules_replacing_manual(rule_items(), true, only(&["listed"]))
+            .await
+            .expect("run rules");
+
+        for summary in [&preview, &result] {
+            assert_eq!(summary.eligible, 0);
+            assert_eq!(summary.protected_manual, 4);
+            assert_eq!(summary.replaced_manual_activities, 0);
+        }
+        for activity in ["listed", "unlisted"] {
+            assert_eq!(
+                stored(&repo, activity).await,
+                vec![
+                    row("payees", "payee_friend", "manual"),
+                    row("spending_categories", "cat_food", "manual"),
+                ]
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn the_override_leaves_a_hand_set_value_the_rule_agrees_with() {
+        let (repo, _dir) = hand_categorized().await;
+
+        let result = repo
+            .assign_rules_replacing_manual(
+                vec![
+                    by_rule("listed", "spending_categories", "cat_food"),
+                    by_rule("listed", "payees", "payee_bakery"),
+                ],
+                false,
+                only(&["listed"]),
+            )
+            .await
+            .expect("run rules");
+
+        assert_eq!(result.unchanged, 1);
+        assert_eq!(result.changed, 1);
+        assert_eq!(
+            stored(&repo, "listed").await,
+            vec![
+                row("payees", "payee_bakery", "rule"),
+                // Still the user's: a later protected run keeps it.
+                row("spending_categories", "cat_food", "manual"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hand_set_value_the_rule_agrees_with_is_not_counted_as_kept() {
+        let (repo, _dir) = hand_categorized().await;
+
+        let preview = repo
+            .preview_rules(
+                vec![
+                    by_rule("listed", "spending_categories", "cat_food"),
+                    by_rule("listed", "payees", "payee_bakery"),
+                    by_rule("unlisted", "spending_categories", "cat_food"),
+                ],
+                false,
+            )
+            .await
+            .expect("preview");
+
+        assert_eq!(preview.protected_manual, 3);
+        assert_eq!(preview.kept_manual_activities, 1);
+        assert_eq!(preview.kept_manual_categories, 0);
+        assert_eq!(preview.kept_manual_payees, 1);
+    }
+
+    #[tokio::test]
+    async fn the_override_does_not_reach_past_split_protection() {
+        let (pool, writer, _dir) = setup_db();
+        {
+            let mut conn = get_connection(&pool).expect("conn");
+            insert_account_and_activity(&mut conn, "split-activity", "MANUAL");
+            insert_split(&mut conn, "split-1", "split-activity");
+            insert_payee(&mut conn, "payee_friend");
+            insert_payee(&mut conn, "payee_bakery");
+        }
+        let repo = ActivityTaxonomyAssignmentRepository::new(pool.clone(), writer);
+        repo.assign_many_single_select_clearing_splits(
+            vec![manual("split-activity", "payees", "payee_friend")],
+            HashMap::new(),
+        )
+        .await
+        .expect("assign payee by hand");
+        let items = || {
+            vec![
+                by_rule("split-activity", "spending_categories", "cat_groceries"),
+                by_rule("split-activity", "payees", "payee_bakery"),
+            ]
+        };
+
+        let preview = repo
+            .preview_rules_replacing_manual(items(), false, only(&["split-activity"]))
+            .await
+            .expect("preview");
+        let result = repo
+            .assign_rules_replacing_manual(items(), false, only(&["split-activity"]))
+            .await
+            .expect("run rules");
+
+        for summary in [&preview, &result] {
+            assert_eq!(summary.protected_splits, 1);
+            assert_eq!(summary.eligible, 1);
+        }
+        // The payee is not part of the split, so the override reaches it; the
+        // category the splits stand in for is not written.
+        assert_eq!(
+            stored(&repo, "split-activity").await,
+            vec![row("payees", "payee_bakery", "rule")]
+        );
+        let mut conn = get_connection(&pool).expect("conn");
+        assert_eq!(
+            spending_activity_splits::table
+                .count()
+                .get_result::<i64>(&mut conn)
+                .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn a_preview_counts_changed_activities_once_across_taxonomies() {
+        let (pool, writer, _dir) = setup_db();
+        {
+            let mut conn = get_connection(&pool).expect("conn");
+            insert_account_and_activity(&mut conn, "fresh", "MANUAL");
+            insert_account_and_activity(&mut conn, "filed", "MANUAL");
+            insert_payee(&mut conn, "payee_bakery");
+        }
+        let repo = ActivityTaxonomyAssignmentRepository::new(pool, writer);
+        repo.assign_rule_many_single_select(
+            vec![by_rule("filed", "spending_categories", "cat_groceries")],
+            false,
+        )
+        .await
+        .expect("first run");
+
+        let preview = repo
+            .preview_rules(
+                vec![
+                    by_rule("fresh", "spending_categories", "cat_groceries"),
+                    by_rule("fresh", "payees", "payee_bakery"),
+                    by_rule("filed", "spending_categories", "cat_groceries"),
+                ],
+                false,
+            )
+            .await
+            .expect("preview");
+
+        assert_eq!(preview.eligible, 2);
+        assert_eq!(preview.changed_activities, 1);
+        assert_eq!(preview.unchanged, 1);
+        assert_eq!(preview.kept_manual_activities, 0);
+        assert!(stored(&repo, "fresh").await.is_empty());
     }
 }

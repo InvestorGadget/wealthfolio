@@ -9,6 +9,7 @@ import {
   type RuleFormState,
   type RuleFormValues,
 } from "./rule-form";
+import { mergeRuleDraft, payeeConditionDraft, type RuleDraft } from "../lib/payee-rules";
 import type { CategorizationRule } from "../types/rule";
 
 vi.mock("@/hooks/use-taxonomies", () => {
@@ -356,6 +357,70 @@ describe("rule form payee fields", () => {
     expect(await submitted(onSubmit)).toMatchObject({
       pattern: "(?i)^(?:AT\\&T|Disney\\+|C\\.O\\.D\\.)$",
       matchType: "regex",
+    });
+  });
+});
+
+describe("rule form started from a draft", () => {
+  const options = [
+    {
+      value: "spending_categories:cat_food",
+      label: "Food",
+      taxonomyId: "spending_categories",
+      categoryId: "cat_food",
+    },
+    { value: "payees:p1", label: "Corner Bakery", taxonomyId: "payees", categoryId: "p1" },
+  ];
+  const renderDraft = (draft: RuleDraft) => {
+    const onSubmit = vi.fn<(values: RuleFormValues) => void>();
+    render(
+      <RuleForm
+        draft={draft}
+        categoryOptions={options}
+        accountOptions={[]}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+    return onSubmit;
+  };
+
+  it("starts a payee's rule on its payee condition, with the target left to pick", async () => {
+    const user = userEvent.setup();
+    const onSubmit = renderDraft(payeeConditionDraft({ id: "p1", name: "Corner Bakery" }));
+
+    expect(screen.getByLabelText("Rule name")).toHaveValue("Corner Bakery");
+    expect(screen.getByRole("button", { name: /^Payee is/ })).toHaveTextContent("Corner Bakery");
+    expect(screen.getByLabelText("Pattern")).toHaveValue("");
+    // It is a new rule, and cannot be saved before a target is picked.
+    await user.click(screen.getByRole("button", { name: "Create rule" }));
+    expect(
+      await screen.findByText("At least a category or activity type is required"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Select category" })).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("starts a merge's rule on its list of whole texts and the destination payee", async () => {
+    const user = userEvent.setup();
+    const onSubmit = renderDraft(
+      mergeRuleDraft(["CORNER BAKERY 0042", "SQ *CORNER BKRY"], {
+        id: "p1",
+        name: "Corner Bakery",
+      }),
+    );
+
+    expect(screen.getByLabelText("Texts")).toHaveValue("CORNER BAKERY 0042\nSQ *CORNER BKRY");
+    await user.click(screen.getByRole("button", { name: "Create rule" }));
+    await vi.waitFor(() => expect(onSubmit).toHaveBeenCalled());
+
+    expect(onSubmit.mock.calls[0][0]).toMatchObject({
+      name: "Corner Bakery",
+      pattern: "(?i)^(?:CORNER BAKERY 0042|SQ \\*CORNER BKRY)$",
+      matchType: "regex",
+      taxonomyId: "payees",
+      categoryId: "p1",
+      payeeConditionId: null,
     });
   });
 });

@@ -179,7 +179,33 @@
     "setPayeeNone": "無收款方",
     "setPayeeHint": "符合的交易也會歸入此收款方，除非您已自行選擇。",
     "setPayeeChip": "同時設定收款方 {{name}}",
-    "unknownPayee": "未知收款方"
+    "unknownPayee": "未知收款方",
+    "runSelected": {
+      "action": "執行規則",
+      "title": "對所選交易執行規則",
+      "loading": "正在檢查規則將變更的內容…",
+      "previewError": "無法檢查規則將變更的內容。請關閉後再試一次。",
+      "nothing": "沒有規則會變更這些交易。",
+      "willChange_one": "規則將變更 {{count}} 筆交易。",
+      "willChange_other": "規則將變更 {{count}} 筆交易。",
+      "keptManual_one": "您手動設定的 {{count}} 筆交易將保留。",
+      "keptManual_other": "您手動設定的 {{count}} 筆交易將保留。",
+      "replacesManual_one": "您手動設定的 {{count}} 筆交易將被取代。",
+      "replacesManual_other": "您手動設定的 {{count}} 筆交易將被取代。",
+      "apply": "執行規則",
+      "done_one": "規則已變更 {{count}} 筆交易。",
+      "done_other": "規則已變更 {{count}} 筆交易。",
+      "doneKept": "手動設定並保留：{{count}}。",
+      "doneReplaced": "手動設定並已取代：{{count}}。",
+      "splitsKept": "保留的分割：{{count}}。",
+      "error": "執行規則失敗。"
+    },
+    "override": {
+      "label": "同時取代我手動設定的類別和收款方（{{count}}）",
+      "confirmTitle": "要取代您手動設定的內容嗎？",
+      "confirmDescription": "在規則符合的交易中，您手動設定的類別和收款方將被取代（受影響的交易：{{count}}）。此操作無法復原。",
+      "confirm": "取代並執行"
+    }
   },
   "transactions": {
     "filterByPayee": "顯示 {{name}} 的交易",

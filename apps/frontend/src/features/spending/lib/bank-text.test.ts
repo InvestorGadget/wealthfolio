@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { getDifferingBankText, getTransactionTitle } from "./bank-text";
+import { getBankText, getDifferingBankText, getTransactionTitle } from "./bank-text";
 
 describe("getTransactionTitle", () => {
   it("prefers the user's notes and falls back to the imported description", () => {
@@ -34,5 +34,19 @@ describe("getDifferingBankText", () => {
     // A manual entry has no bank text to show.
     expect(getDifferingBankText({ importedDescription: null, notes: "Lunch" })).toBeUndefined();
     expect(getDifferingBankText({ importedDescription: " ", notes: "Lunch" })).toBeUndefined();
+  });
+});
+
+describe("getBankText", () => {
+  it("is the imported description, else the notes, as rules read them", () => {
+    expect(getBankText({ importedDescription: "TESCO 3301", notes: "Weekly shop" })).toBe(
+      "TESCO 3301",
+    );
+    expect(getBankText({ importedDescription: "   ", notes: "TESCO EXPRESS" })).toBe(
+      "TESCO EXPRESS",
+    );
+    expect(getBankText({ importedDescription: null, notes: "  " })).toBeUndefined();
+    // As stored: a rule's exact match sees the spaces too.
+    expect(getBankText({ notes: " PADDED " })).toBe(" PADDED ");
   });
 });

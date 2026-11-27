@@ -224,6 +224,46 @@ where
     Option::<T>::deserialize(deserializer).map(Some)
 }
 
+/// What a rule run is narrowed to, beyond the accounts it covers.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleRunScope {
+    /// Run on these activities only. `None` runs on every activity of the
+    /// accounts; an empty list runs on nothing.
+    #[serde(default)]
+    pub activity_ids: Option<Vec<String>>,
+    /// Let a matching rule replace a category or payee the user set by hand,
+    /// on the activities of `activity_ids`. Refused without `activity_ids`:
+    /// a whole-account run never replaces manual values. Refused for an
+    /// uncategorized-only run too: that mode keeps every existing value.
+    #[serde(default)]
+    pub override_manual: bool,
+}
+
+impl RuleRunScope {
+    /// The activities whose hand-set values this run may replace: none unless
+    /// the override is on, and then exactly the listed ones.
+    pub fn manual_overrides(
+        &self,
+        only_uncategorized: bool,
+    ) -> Result<std::collections::HashSet<String>, crate::error::SpendingError> {
+        if !self.override_manual {
+            return Ok(Default::default());
+        }
+        if only_uncategorized {
+            return Err(crate::error::SpendingError::InvalidInput {
+                message: "An uncategorized-only run cannot replace manual categories".to_string(),
+            });
+        }
+        match &self.activity_ids {
+            Some(ids) => Ok(ids.iter().cloned().collect()),
+            None => Err(crate::error::SpendingError::InvalidInput {
+                message: "Replacing manual categories needs a list of activities".to_string(),
+            }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
