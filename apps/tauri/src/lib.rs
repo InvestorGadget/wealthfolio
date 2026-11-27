@@ -352,6 +352,8 @@ pub fn run() {
             commands::spending::delete_categorization_rule,
             commands::spending::rerun_categorization_rules,
             commands::spending::rerun_categorization_rules_detailed,
+            commands::spending::preview_categorization_rules_rerun,
+            commands::spending::explain_activity_rules,
             commands::spending::list_rule_presets,
             commands::spending::import_rule_preset,
             commands::spending::remove_rule_preset,

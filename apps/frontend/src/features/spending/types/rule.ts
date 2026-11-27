@@ -111,3 +111,26 @@ export interface RemovePresetResult {
   removed: number;
   keptModified: number;
 }
+
+/** A rule that applies to a transaction, and what it sets there. */
+export interface AppliedRule {
+  rule: CategorizationRule;
+  taxonomyId: string;
+  categoryId: string;
+}
+
+/**
+ * What a full rule run makes of one transaction, whatever is on file for it.
+ * Mirrors `ActivityRuleExplanation` in `wealthfolio_spending`.
+ */
+export interface ActivityRuleExplanation {
+  activityId: string;
+  /** The text rules match: the bank's description, else the notes. */
+  bankText?: string | null;
+  /** The payee the transaction is filed under now. */
+  payeeId?: string | null;
+  /** The rule a run takes the transaction's payee from. */
+  payeeRule?: AppliedRule | null;
+  /** The rule a run takes the transaction's category from. */
+  categoryRule?: AppliedRule | null;
+}

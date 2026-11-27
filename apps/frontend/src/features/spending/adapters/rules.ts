@@ -1,5 +1,11 @@
 import { invoke, logger } from "#platform";
-import type { ImportPresetResult, RemovePresetResult, RulePresetSummary } from "../types/rule";
+import type {
+  ActivityRuleExplanation,
+  CategorizationRunSummary,
+  ImportPresetResult,
+  RemovePresetResult,
+  RulePresetSummary,
+} from "../types/rule";
 
 export type { ImportPresetResult, RemovePresetResult, RulePresetSummary } from "../types/rule";
 
@@ -35,6 +41,35 @@ export const removeRulePreset = async (presetId: string): Promise<RemovePresetRe
     return await invoke<RemovePresetResult>("remove_rule_preset", { presetId });
   } catch (e) {
     logger.error("Error removing rule preset.");
+    throw e;
+  }
+};
+
+/** What a rerun would change, without writing it. */
+export const previewCategorizationRulesRerun = async (
+  onlyUncategorized: boolean,
+): Promise<CategorizationRunSummary> => {
+  try {
+    return await invoke<CategorizationRunSummary>("preview_categorization_rules_rerun", {
+      onlyUncategorized,
+    });
+  } catch (e) {
+    logger.error("Error previewing categorization rules.");
+    throw e;
+  }
+};
+
+/**
+ * The rules that apply to these transactions, as a rule run matches them.
+ * Read-only; transactions outside Spending are left out.
+ */
+export const explainActivityRules = async (
+  activityIds: string[],
+): Promise<ActivityRuleExplanation[]> => {
+  try {
+    return await invoke<ActivityRuleExplanation[]>("explain_activity_rules", { activityIds });
+  } catch (e) {
+    logger.error("Error explaining categorization rules.");
     throw e;
   }
 };

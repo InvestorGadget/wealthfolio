@@ -19,8 +19,8 @@ use wealthfolio_spending::cash_activities::{
     CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, CategorizationRunSummary, ImportPresetResult, NewCategorizationRule,
-    RemovePresetResult, RulePresetSummary, UpdateCategorizationRule,
+    ActivityRuleExplanation, CategorizationRule, CategorizationRunSummary, ImportPresetResult,
+    NewCategorizationRule, RemovePresetResult, RulePresetSummary, UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
@@ -430,6 +430,48 @@ pub async fn rerun_categorization_rules_detailed(
         .rerun_detailed(&settings.account_ids, only_uncategorized)
         .await
         .map_err(|e| format!("Failed to re-run rules: {}", e))
+}
+
+/// What a rerun would change, without writing it.
+#[tauri::command]
+pub async fn preview_categorization_rules_rerun(
+    only_uncategorized: bool,
+    state: ProfileAccess,
+) -> Result<CategorizationRunSummary, String> {
+    let context = state.context()?;
+    let settings = context
+        .spending_settings_service()
+        .get()
+        .await
+        .map_err(|e| format!("Failed to load spending settings: {}", e))?;
+    if !settings.enabled {
+        return Ok(CategorizationRunSummary::default());
+    }
+    context
+        .categorization_rules_service()
+        .preview_rerun(&settings.account_ids, only_uncategorized)
+        .await
+        .map_err(|e| format!("Failed to preview rules: {}", e))
+}
+
+/// The rules that apply to these activities. Read-only.
+#[tauri::command]
+pub async fn explain_activity_rules(
+    activity_ids: Vec<String>,
+    state: ProfileAccess,
+) -> Result<Vec<ActivityRuleExplanation>, String> {
+    // The same batch a bulk assignment may hold: it is asked about one.
+    if activity_ids.len() > MAX_BULK_CATEGORY_ASSIGNMENTS {
+        return Err(format!(
+            "At most {MAX_BULK_CATEGORY_ASSIGNMENTS} activities can be explained at once"
+        ));
+    }
+    state
+        .context()?
+        .categorization_rules_service()
+        .explain_activities(&activity_ids)
+        .await
+        .map_err(|e| format!("Failed to explain rules: {}", e))
 }
 
 #[tauri::command]

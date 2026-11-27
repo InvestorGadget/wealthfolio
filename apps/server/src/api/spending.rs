@@ -24,7 +24,8 @@ use wealthfolio_spending::cash_activities::{
     CashActivity, CashActivityFilter, CashActivitySearchRequest, CashActivitySearchResponse,
 };
 use wealthfolio_spending::categorization_rules::{
-    CategorizationRule, CategorizationRunSummary, NewCategorizationRule, UpdateCategorizationRule,
+    ActivityRuleExplanation, CategorizationRule, CategorizationRunSummary, NewCategorizationRule,
+    UpdateCategorizationRule,
 };
 use wealthfolio_spending::events::{Event, EventType, NewEvent, NewEventType, UpdateEvent};
 use wealthfolio_spending::insight::{SpendingInsight, SpendingInsightRequest};
@@ -394,6 +395,46 @@ async fn rerun_categorization_rules_detailed(
         state
             .categorization_rules_service
             .rerun_detailed(&settings.account_ids, body.only_uncategorized)
+            .await?,
+    ))
+}
+
+async fn preview_categorization_rules_rerun(
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
+    Json(body): Json<RerunRulesBody>,
+) -> ApiResult<Json<CategorizationRunSummary>> {
+    let settings = state.spending_settings_service.get().await?;
+    if !settings.enabled {
+        return Ok(Json(CategorizationRunSummary::default()));
+    }
+    Ok(Json(
+        state
+            .categorization_rules_service
+            .preview_rerun(&settings.account_ids, body.only_uncategorized)
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExplainRulesBody {
+    activity_ids: Vec<String>,
+}
+
+async fn explain_activity_rules(
+    axum::Extension(state): axum::Extension<Arc<AppState>>,
+    Json(body): Json<ExplainRulesBody>,
+) -> ApiResult<Json<Vec<ActivityRuleExplanation>>> {
+    // The same batch a bulk assignment may hold: it is asked about one.
+    if body.activity_ids.len() > MAX_BULK_CATEGORY_ASSIGNMENTS {
+        return Err(ApiError::BadRequest(format!(
+            "At most {MAX_BULK_CATEGORY_ASSIGNMENTS} activities can be explained at once"
+        )));
+    }
+    Ok(Json(
+        state
+            .categorization_rules_service
+            .explain_activities(&body.activity_ids)
             .await?,
     ))
 }
@@ -887,6 +928,11 @@ pub fn router<S: Clone + Send + Sync + 'static>() -> Router<S> {
             "/spending/rules/rerun/detailed",
             post(rerun_categorization_rules_detailed),
         )
+        .route(
+            "/spending/rules/rerun/preview",
+            post(preview_categorization_rules_rerun),
+        )
+        .route("/spending/rules/explain", post(explain_activity_rules))
         .route("/spending/rule-presets", get(list_rule_presets))
         .route(
             "/spending/rule-presets/{preset_id}/import",

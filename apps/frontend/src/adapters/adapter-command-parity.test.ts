@@ -231,6 +231,28 @@ describe("adapter command parity", () => {
     expect(await invoke("rerun_categorization_rules", { onlyUncategorized: true })).toBe(1);
   });
 
+  it("routes the rule read calls of the rule suggestion prompt", async () => {
+    const explanation = [{ activityId: "a1", bankText: "TESCO", categoryRule: null }];
+    let mock = stubFetch(explanation);
+    expect(await invoke("explain_activity_rules", { activityIds: ["a1"] })).toEqual(explanation);
+    expect(lastCall(mock)).toEqual({
+      url: "/api/v1/spending/rules/explain",
+      method: "POST",
+      body: JSON.stringify({ activityIds: ["a1"] }),
+    });
+
+    const summary = { matched: 3, eligible: 2, protectedManual: 1 };
+    mock = stubFetch(summary);
+    expect(await invoke("preview_categorization_rules_rerun", { onlyUncategorized: true })).toEqual(
+      summary,
+    );
+    expect(lastCall(mock)).toEqual({
+      url: "/api/v1/spending/rules/rerun/preview",
+      method: "POST",
+      body: JSON.stringify({ onlyUncategorized: true }),
+    });
+  });
+
   it("registers every command reachable from the web adapter", () => {
     const files = [
       ...collectSourceFiles(path.join(frontendSrcDir, "adapters/shared")),
