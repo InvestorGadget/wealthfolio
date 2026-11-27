@@ -231,25 +231,14 @@ describe("adapter command parity", () => {
     expect(await invoke("rerun_categorization_rules", { onlyUncategorized: true })).toBe(1);
   });
 
-  it("routes the rule read calls of the rule suggestion prompt", async () => {
+  it("routes the rule explanation of the rule suggestion prompt", async () => {
     const explanation = [{ activityId: "a1", bankText: "TESCO", categoryRule: null }];
-    let mock = stubFetch(explanation);
+    const mock = stubFetch(explanation);
     expect(await invoke("explain_activity_rules", { activityIds: ["a1"] })).toEqual(explanation);
     expect(lastCall(mock)).toEqual({
       url: "/api/v1/spending/rules/explain",
       method: "POST",
       body: JSON.stringify({ activityIds: ["a1"] }),
-    });
-
-    const summary = { matched: 3, eligible: 2, protectedManual: 1 };
-    mock = stubFetch(summary);
-    expect(await invoke("preview_categorization_rules_rerun", { onlyUncategorized: true })).toEqual(
-      summary,
-    );
-    expect(lastCall(mock)).toEqual({
-      url: "/api/v1/spending/rules/rerun/preview",
-      method: "POST",
-      body: JSON.stringify({ onlyUncategorized: true }),
     });
   });
 
@@ -283,6 +272,27 @@ describe("adapter command parity", () => {
       method: "PUT",
       body: JSON.stringify({ name: "Tesco" }),
     });
+  });
+
+  it("sends a rule run's scope and override only when given, to the run and its preview", async () => {
+    const summary = { matched: 2, changedActivities: 1, keptManualActivities: 1 };
+    const scope = { activityIds: ["a1", "a2"], overrideManual: true };
+    for (const [command, route] of [
+      ["rerun_categorization_rules_detailed", "/api/v1/spending/rules/rerun/detailed"],
+      ["preview_categorization_rules_rerun", "/api/v1/spending/rules/rerun/preview"],
+    ] as const) {
+      const mock = stubFetch(summary);
+      expect(await invoke(command, { onlyUncategorized: false, ...scope })).toEqual(summary);
+      expect(lastCall(mock)).toEqual({
+        url: route,
+        method: "POST",
+        body: JSON.stringify({ onlyUncategorized: false, ...scope }),
+      });
+
+      const unscoped = stubFetch(summary);
+      await invoke(command, { onlyUncategorized: true });
+      expect(lastCall(unscoped).body).toBe(JSON.stringify({ onlyUncategorized: true }));
+    }
   });
 
   it("registers every command reachable from the web adapter", () => {

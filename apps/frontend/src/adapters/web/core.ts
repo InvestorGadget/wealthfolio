@@ -1586,11 +1586,21 @@ export const invoke = async <T>(command: string, payload?: Record<string, unknow
       url += `/${encodeURIComponent(id)}`;
       break;
     }
-    case "rerun_categorization_rules":
-    case "rerun_categorization_rules_detailed":
-    case "preview_categorization_rules_rerun": {
+    case "rerun_categorization_rules": {
       const { onlyUncategorized } = payload as { onlyUncategorized: boolean };
       body = JSON.stringify({ onlyUncategorized });
+      break;
+    }
+    case "rerun_categorization_rules_detailed":
+    case "preview_categorization_rules_rerun": {
+      // Without a scope the body is what it always was; `undefined` keys are
+      // dropped by JSON.stringify.
+      const { onlyUncategorized, activityIds, overrideManual } = payload as {
+        onlyUncategorized: boolean;
+        activityIds?: string[];
+        overrideManual?: boolean;
+      };
+      body = JSON.stringify({ onlyUncategorized, activityIds, overrideManual });
       break;
     }
     case "explain_activity_rules": {

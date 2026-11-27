@@ -18,6 +18,7 @@ export {
   deleteCategorizationRule,
   rerunCategorizationRules,
   rerunCategorizationRulesDetailed,
+  previewCategorizationRulesRerun,
 } from "../../../adapters/shared/spending";
 
 export const listRulePresets = async (): Promise<RulePresetSummary[]> => {
@@ -43,20 +44,6 @@ export const removeRulePreset = async (presetId: string): Promise<RemovePresetRe
     return await invoke<RemovePresetResult>("remove_rule_preset", { presetId });
   } catch (e) {
     logger.error("Error removing rule preset.");
-    throw e;
-  }
-};
-
-/** What a rerun would change, without writing it. */
-export const previewCategorizationRulesRerun = async (
-  onlyUncategorized: boolean,
-): Promise<CategorizationRunSummary> => {
-  try {
-    return await invoke<CategorizationRunSummary>("preview_categorization_rules_rerun", {
-      onlyUncategorized,
-    });
-  } catch (e) {
-    logger.error("Error previewing categorization rules.");
     throw e;
   }
 };
